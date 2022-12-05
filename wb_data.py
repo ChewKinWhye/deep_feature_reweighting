@@ -52,6 +52,68 @@ class WaterBirdsDataset(Dataset):
             img = self.transform(img)
         return img, y, g, p
 
+    def __getitemrgb__(self, idx):
+        y = self.y_array[idx]
+        g = self.group_array[idx]
+        p = self.confounder_array[idx]
+
+        img_path = os.path.join(self.basedir, self.filename_array[idx])
+        img_raw = Image.open(img_path).convert('RGB')
+        img = None
+        # img = read_image(img_path)
+        # img = img.float() / 255.
+
+        if self.transform:
+            img = self.transform(img_raw)
+        return img, y, g, p, np.asarray(img_raw.resize((224, 224)))/255
+
+class WaterBirdsDataset2(Dataset):
+    def __init__(self, basedir, segdir, split="train", transform=None):
+        try:
+            split_i = ["train", "val", "test"].index(split)
+        except ValueError:
+            raise(f"Unknown split {split}")
+        metadata_df = pd.read_csv(os.path.join(basedir, "metadata.csv"))
+        print(len(metadata_df))
+        self.metadata_df = metadata_df[metadata_df["split"] == split_i]
+        print(len(self.metadata_df))
+        self.basedir = basedir
+        self.segdir = segdir
+        self.transform = transform
+        self.y_array = self.metadata_df['y'].values
+        self.p_array = self.metadata_df['place'].values
+        self.n_classes = np.unique(self.y_array).size
+        self.confounder_array = self.metadata_df['place'].values
+        self.n_places = np.unique(self.confounder_array).size
+        self.group_array = (self.y_array * self.n_places + self.confounder_array).astype('int')
+        self.n_groups = self.n_classes * self.n_places
+        self.group_counts = (
+                torch.arange(self.n_groups).unsqueeze(1) == torch.from_numpy(self.group_array)).sum(1).float()
+        self.y_counts = (
+                torch.arange(self.n_classes).unsqueeze(1) == torch.from_numpy(self.y_array)).sum(1).float()
+        self.p_counts = (
+                torch.arange(self.n_places).unsqueeze(1) == torch.from_numpy(self.p_array)).sum(1).float()
+        self.filename_array = self.metadata_df['img_filename'].values
+
+    def __len__(self):
+        return len(self.metadata_df)
+
+    def __getitem__(self, idx):
+        img_path = os.path.join(self.basedir, self.filename_array[idx])
+        seg_path = os.path.join(self.segdir, self.filename_array[idx]).replace(".jpg", ".png")
+        img = np.asarray(Image.open(img_path).convert('RGB'))
+        seg = np.asarray(Image.open(seg_path).convert('RGB')) / 255
+        fg_img = Image.fromarray(np.around(img * seg).astype(np.uint8))
+        bg_img = Image.fromarray(np.around(img * (1-seg)).astype(np.uint8))
+        img = Image.fromarray(img)
+        # fg_img.save("fg.jpg")
+        # bg_img.save("bg.jpg")
+        # img.save("full.jpg")
+        fg_img_transform = self.transform(fg_img)
+        bg_img_transform = self.transform(bg_img)
+        img_transform = self.transform(img)
+        return fg_img_transform, bg_img_transform, img_transform
+
 
 def get_transform_cub(target_resolution, train, augment_data):
     scale = 256.0 / 224.0
