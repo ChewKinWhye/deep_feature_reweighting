@@ -9,201 +9,88 @@ import sys
 from collections import defaultdict
 import json
 from functools import partial
-
+import math
 from wb_data import WaterBirdsDataset, get_loader, get_transform_cub, log_data
+from argparse import Namespace
+from ray import tune
 
-from utils import MultiTaskHead
+from utils import MultiTaskHead, Discriminator
 from utils import Logger, AverageMeter, set_seed, evaluate, get_y_p
 from utils import update_dict, get_results, write_dict_to_tb
+from utils import kaiming_init, normal_init, get_embed, permute_dims
+from utils import feature_reg_loss_specific, contrastive_loss, retain_feature_loss, coral_loss, correlation_loss, MTL_Loss
 from visualization import visualize_activations
 from torchsummary import summary
 import torch.nn as nn
 import torch.nn.init as init
 import torch.nn.functional as F
 
+VAL_SIZE = 1199
 
-def kaiming_init(m):
-    if isinstance(m, (nn.Linear, nn.Conv2d)):
-        init.kaiming_normal_(m.weight)
-        if m.bias is not None:
-            m.bias.data.fill_(0)
-    elif isinstance(m, (nn.BatchNorm1d, nn.BatchNorm2d)):
-        m.weight.data.fill_(1)
-        if m.bias is not None:
-            m.bias.data.fill_(0)
-
-
-def normal_init(m):
-    if isinstance(m, (nn.Linear, nn.Conv2d)):
-        init.normal_(m.weight, 0, 0.02)
-        if m.bias is not None:
-            m.bias.data.fill_(0)
-    elif isinstance(m, (nn.BatchNorm1d, nn.BatchNorm2d)):
-        m.weight.data.fill_(1)
-        if m.bias is not None:
-            m.bias.data.fill_(0)
-def get_embed(m, x):
-    x = m.conv1(x)
-    x = m.bn1(x)
-    x = m.relu(x)
-    x = m.maxpool(x)
-    x = m.layer1(x)
-    x = m.layer2(x)
-    x = m.layer3(x)
-    x = m.layer4(x)
-    x = m.avgpool(x)
-    x = torch.flatten(x, 1)
-    return x
-
-class Discriminator(nn.Module):
-    def __init__(self, z_dim):
-        super(Discriminator, self).__init__()
-        self.z_dim = z_dim
-        self.net = torch.nn.Sequential(
-            torch.nn.Linear(z_dim, 1000),
-            torch.nn.LeakyReLU(0.2, True),
-            torch.nn.Linear(1000, 1000),
-            torch.nn.LeakyReLU(0.2, True),
-            torch.nn.Linear(1000, 1000),
-            torch.nn.LeakyReLU(0.2, True),
-            torch.nn.Linear(1000, 1000),
-            torch.nn.LeakyReLU(0.2, True),
-            torch.nn.Linear(1000, 1000),
-            torch.nn.LeakyReLU(0.2, True),
-            torch.nn.Linear(1000, 2),
-        )
-        self.weight_init()
-
-    def weight_init(self, mode='normal'):
-        if mode == 'kaiming':
-            initializer = kaiming_init
-        elif mode == 'normal':
-            initializer = normal_init
-
-        for block in self._modules:
-            for m in self._modules[block]:
-                initializer(m)
-
-    def forward(self, z):
-        return self.net(z).squeeze()
-
-
-def get_embed(m, x):
-    x = m.conv1(x)
-    x = m.bn1(x)
-    x = m.relu(x)
-    x = m.maxpool(x)
-
-    x = m.layer1(x)
-    x = m.layer2(x)
-    x = m.layer3(x)
-    x = m.layer4(x)
-
-    x = m.avgpool(x)
-    x = torch.flatten(x, 1)
-    return x
-
-def permute_dims(z):
-    assert z.dim() == 2
-    B, _ = z.size()
-    perm_z = []
-    for z_j in z.split(1024, 1):
-        perm = torch.randperm(B).to(z.device)
-        perm_z_j = z_j[perm]
-        perm_z.append(perm_z_j)
-    return torch.cat(perm_z, 1)
-
-def feature_reg_loss_specific(model, x, y, p):
-    features = get_embed(model, x)
-    reg_loss = 0
-    reg_loss += torch.norm(features[torch.logical_and((y == 0), (p == 0))][:, :400].mean(dim=0) -
-                           features[torch.logical_and((y == 0), (p == 1))][:, :400].mean(dim=0))
-    reg_loss += torch.norm(features[torch.logical_and((y == 1), (p == 0))][:, 400:800].mean(dim=0) -
-                           features[torch.logical_and((y == 1), (p == 1))][:, 400:800].mean(dim=0))
-
-    reg_loss += torch.norm(features[torch.logical_and((y == 0), (p == 0))][:, 800:1200].mean(dim=0) -
-                           features[torch.logical_and((y == 1), (p == 0))][:, 800:1200].mean(dim=0))
-    reg_loss += torch.norm(features[torch.logical_and((y == 1), (p == 1))][:, 1200:1600].mean(dim=0) -
-                           features[torch.logical_and((y == 0), (p == 1))][:, 1200:1600].mean(dim=0))
-    return reg_loss
-
-def feature_reg_loss_general(model, x, y, p):
-    features = get_embed(model, x)
-    reg_loss = 0
-    reg_loss += torch.norm(features[torch.logical_and((y == 0), (p == 0))][:, :800].mean(dim=0) -
-                           features[torch.logical_and((y == 0), (p == 1))][:, :800].mean(dim=0))
-    reg_loss += torch.norm(features[torch.logical_and((y == 1), (p == 0))][:, :800].mean(dim=0) -
-                           features[torch.logical_and((y == 1), (p == 1))][:, :800].mean(dim=0))
-
-    reg_loss += torch.norm(features[torch.logical_and((y == 0), (p == 0))][:, 800:1600].mean(dim=0) -
-                           features[torch.logical_and((y == 1), (p == 0))][:, 800:1600].mean(dim=0))
-    reg_loss += torch.norm(features[torch.logical_and((y == 1), (p == 1))][:, 800:1600].mean(dim=0) -
-                           features[torch.logical_and((y == 0), (p == 1))][:, 800:1600].mean(dim=0))
-    return reg_loss
-
-if __name__ == "__main__":
+def parse_args():
+        # --- Parser Start ---
     parser = argparse.ArgumentParser(description="Train model on waterbirds data")
+    # Data Directory
     parser.add_argument(
         "--data_dir", type=str,
         default="/home/bizon/Desktop/KinWhye/BalancingGroups/data/waterbirds/waterbird_complete95_forest2water2",
         help="Train dataset directory")
-    parser.add_argument(
-        "--test_wb_dir", type=str,
-        default="/home/bizon/Desktop/KinWhye/BalancingGroups/data/waterbirds/waterbird_complete95_forest2water2",
-        help="Test data directory, regular waterbirds")
-    parser.add_argument(
-        "--test_grey_dir", type=str,
-        default=None,
-        help="Test data directory, waterbirds w/o background")
-    parser.add_argument(
-        "--test_places_dir", type=str,
-        default="/home/bizon/Desktop/KinWhye/BalancingGroups/data/waterbirds/waterbird_complete95_forest2water2",
-        help="Test data directory, places")
+    # Output Directory
     parser.add_argument(
         "--output_dir", type=str,
         default="logs/",
         help="Output directory")
 
+    # Model
     parser.add_argument("--pretrained_model", action='store_true', help="Use pretrained model")
+
+    # Data
     parser.add_argument("--reweight_classes", action='store_true', help="Reweight classes")
-    parser.add_argument("--reweight_places", action='store_true', help="Reweight based on place")
     parser.add_argument("--reweight_groups", action='store_true', help="Reweight groups")
     parser.add_argument("--augment_data", action='store_true', help="Train data augmentation")
+    parser.add_argument("--multitask", action='store_true', help="Predict label and group")
+
+    # Training
     parser.add_argument("--scheduler", action='store_true', help="Learning rate scheduler")
-    parser.add_argument("--increasing_decay", action='store_true', help="Learning rate scheduler")
-
     parser.add_argument("--batch_size", type=int, default=128)
-    parser.add_argument("--num_epochs", type=int, default=300)
+    parser.add_argument("--num_epochs", type=int, default=100)
     parser.add_argument("--weight_decay", type=float, default=1e-4)
-    parser.add_argument("--weight_decay_type", type=str, default="l2")
-
     parser.add_argument("--momentum_decay", type=float, default=0.9)
     parser.add_argument("--init_lr", type=float, default=0.001)
     parser.add_argument("--eval_freq", type=int, default=1)
     parser.add_argument("--seed", type=int, default=1)
-    parser.add_argument("--feature_reg_type", type=str, default=None, help="general/specific/")
-    parser.add_argument("--feature_reg", type=float, default=0.1)
 
-    parser.add_argument("--independence", action='store_true', help="Whether to add independence regularization")
-    parser.add_argument("--conditional_independence", action='store_true', help="Whether to add conditional independence regularization")
-
-    # Target
-    parser.add_argument("--multitask", action='store_true', help="Predict label and group")
-    parser.add_argument("--predict_place", action='store_true', help="Predict label and group")
-
-    #Understanding exps
-    # parser.add_argument("--no_minority_groups", action='store_true',
-    #                     help="Remove all minority group examples from the train data")
-    parser.add_argument("--num_minority_groups_remove", type=int, required=False, default=0)
-
-    parser.add_argument("--resume", type=str, default=None)
+    # Different methods and combination of methods
+    parser.add_argument("--method", type=int, default=0, help="Which method to use")
+    
+    # Method 0: Normal ERM
+    # Method 1: Contrast All
+    # Method 2: Contrast Tenth
+    # Method 3: Contrast 1/100
+    # Method 4: Coral
+    # Method 5: Conditional Coral
+    # Method 6: Conditional Independence via Correlation Matrix
+    # Method 7: MTL
+    # Scale of the methods
+    parser.add_argument("--contrast_temperature", type=float, default=0.5, help="contrast the other half of the feature space inversely")
+    parser.add_argument("--method_scale", type=float, default=0.1, help="Scale of feature regularization")
+    parser.add_argument("--method_dataset", type=float, default=0.1, help="Scale of feature regularization")
 
 
     args = parser.parse_args()
-
     assert args.reweight_groups + args.reweight_classes <= 1
-    assert args.multitask + args.predict_place <= 1
+    # --- Parser End ---
+    return args
 
+# parameters in config overwrites the parser arguments
+def main(config=None, args=None):
+    if config is not None:
+        args = vars(args)
+        for key, value in config.items():
+            args[key] = value
+        args = Namespace(**args)
+        print(args)
+    # --- Logger Start ---
     print('Preparing directory %s' % args.output_dir)
     os.makedirs(args.output_dir, exist_ok=True)
     with open(os.path.join(args.output_dir, 'command.sh'), 'w') as f:
@@ -215,81 +102,65 @@ if __name__ == "__main__":
         f.write(args_json)
 
     set_seed(args.seed)
-
     logger = Logger(os.path.join(args.output_dir, 'log.txt'))
 
+    # --- Logger End ---
+
+    # --- Data Start ---
     splits = ["train", "test", "val"]
     basedir = args.data_dir
-
-    # Data
     target_resolution = (224, 224)
     train_transform = get_transform_cub(target_resolution=target_resolution, train=True, augment_data=args.augment_data)
     test_transform = get_transform_cub(target_resolution=target_resolution, train=False, augment_data=args.augment_data)
 
+    # For methods that require the target dataset, we split the validation set into two
+    if args.method in [1, 2, 3, 4, 5, 7]:
+        indicies = np.arange(VAL_SIZE)
+        np.random.shuffle(indicies)
+        indicies_val = indicies[:len(indicies)//2]
+        indicies_target = indicies[len(indicies)//2:]
+        with open(os.path.join(args.output_dir, "indicies_val.npy"), "wb") as f:
+            np.save(f, indicies_val)
+        valset_target = WaterBirdsDataset(basedir=basedir, split="val", transform=train_transform, indicies=indicies_target)
+    # Otherwise we simply use the entire validation dataset
+    else:
+        indicies_val = np.arange(len(testset_dict["Validation"]))
+        valset_target = None
+
     trainset = WaterBirdsDataset(basedir=basedir, split="train", transform=train_transform)
     testset_dict = {
-        'wb': WaterBirdsDataset(basedir=args.test_wb_dir, split="test", transform=test_transform),
-        'wb_val': WaterBirdsDataset(basedir=args.test_wb_dir, split="val", transform=test_transform),
+        'Test': WaterBirdsDataset(basedir=basedir, split="test", transform=test_transform),
+        'Validation': WaterBirdsDataset(basedir=basedir, split="val", transform=test_transform, indicies=indicies_val),
     }
-
-    if not args.predict_place and not (args.test_grey_dir is None):
-        testset_dict['grey'] = WaterBirdsDataset(basedir=args.test_grey_dir, split="test", transform=test_transform)
-    if ((args.predict_place) and not (args.test_places_dir is None)) or args.multitask:
-        testset_dict['places'] = WaterBirdsDataset(basedir=args.test_places_dir, split="test", transform=test_transform)
-
-    if args.num_minority_groups_remove > 0:
-        print("Removing minority groups")
-        print("Initial groups", np.bincount(trainset.group_array))
-        group_counts = trainset.group_counts
-        minority_groups = np.argsort(group_counts.numpy())[:args.num_minority_groups_remove]
-        minority_groups
-        idx = np.where(np.logical_and.reduce(
-            [trainset.group_array != g for g in minority_groups], initial=True))[0]
-        trainset.y_array = trainset.y_array[idx]
-        trainset.group_array = trainset.group_array[idx]
-        trainset.confounder_array = trainset.confounder_array[idx]
-        trainset.filename_array = trainset.filename_array[idx]
-        trainset.metadata_df = trainset.metadata_df.iloc[idx]
-        print("Final groups", np.bincount(trainset.group_array))
-
-    # testset = WaterBirdsDataset(basedir=basedir, split="test", transform=test_transform)
-    # valset = WaterBirdsDataset(basedir=basedir, split="val", transform=test_transform)
+    # For methods that use the validation dataset, the validation dataset is split into two, one for training and the other for tuning
 
     loader_kwargs = {'batch_size': args.batch_size, 'num_workers': 4, 'pin_memory': True}
     train_loader = get_loader(
         trainset, train=True, reweight_groups=args.reweight_groups,
-        reweight_classes=args.reweight_classes, reweight_places=args.reweight_places, **loader_kwargs)
+        reweight_classes=args.reweight_classes, reweight_places=False, **loader_kwargs)
     test_loader_dict = {}
     for test_name, testset_v in testset_dict.items():
         test_loader_dict[test_name] = get_loader(
             testset_v, train=False, reweight_groups=None,
             reweight_classes=None, reweight_places=None, **loader_kwargs)
 
-    # test_loader = get_loader(
-    #   testset, train=False, reweight_groups=None, reweight_classes=None, **loader_kwargs)
-
     get_yp_func = partial(get_y_p, n_places=trainset.n_places)
-    log_data(logger, trainset, testset_dict['wb'], get_yp_func=get_yp_func)
+    log_data(logger, trainset, testset_dict['Test'], get_yp_func=get_yp_func)
+    # --- Data End ---
 
-    # Model
+    # --- Model Start ---
     n_classes = trainset.n_classes
     model = torchvision.models.resnet50(pretrained=args.pretrained_model)
+
     d = model.fc.in_features
     if not args.multitask:
         model.fc = torch.nn.Linear(d, n_classes)
     else:
         model.fc = MultiTaskHead(d, [n_classes, trainset.n_places])
-
-    # TODO: fix resuming from a checkpoint
-    if args.resume is not None:
-        print('Resuming from checkpoint at {}...'.format(args.resume))
-        checkpoint = torch.load(args.resume)
-        model.load_state_dict(checkpoint)
-
     model.cuda()
 
     optimizer = torch.optim.SGD(
-        model.parameters(), lr=args.init_lr, momentum=args.momentum_decay, weight_decay=0)
+        model.parameters(), lr=args.init_lr, momentum=args.momentum_decay, weight_decay=args.weight_decay)
     if args.scheduler:
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             optimizer, T_max=args.num_epochs)
@@ -297,30 +168,23 @@ if __name__ == "__main__":
         scheduler = None
 
     criterion = torch.nn.CrossEntropyLoss()
+    # --- Model End ---
 
-    logger.flush()
-
-    discriminator_model = Discriminator(2048).cuda()
-    discriminator_optim = torch.optim.Adam(discriminator_model.parameters(), lr=1e-5)
-    if args.conditional_independence:
-        # For y==1
-        discriminator_model_2 = Discriminator(2048).cuda()
-        discriminator_optim_2 = torch.optim.Adam(discriminator_model_2.parameters(), lr=1e-5)
-
-    # Train loop
+    # --- Train Start ---
+    best_worst_acc = 0
     for epoch in range(args.num_epochs):
         model.train()
+        # Track metrics
         loss_meter = AverageMeter()
         acc_groups = {g_idx : AverageMeter() for g_idx in range(trainset.n_groups)}
         if args.multitask:
             acc_place_groups = {g_idx: AverageMeter() for g_idx in range(trainset.n_groups)}
 
         for batch in tqdm.tqdm(train_loader):
-            x, y, g, p = batch
+            # Data
+            x, y, g, p, idxs = batch
             x, y, p = x.cuda(), y.cuda(), p.cuda()
-            if args.predict_place:
-                y = p
-
+            # Forward pass
             optimizer.zero_grad()
             logits = model(x)
             if args.multitask:
@@ -330,118 +194,76 @@ if __name__ == "__main__":
             else:
                 loss = criterion(logits, y)
 
-            if args.feature_reg_type == "specific":
-                loss += (feature_reg_loss_specific(model, x, y, p) * args.feature_reg)
-            elif args.feature_reg_type == "general":
-                loss += (feature_reg_loss_general(model, x, y, p) * args.feature_reg)
-
-            if args.weight_decay_type == "l2":
-                norm = sum(p.pow(2.0).sum()
-                              for p in model.parameters())
-                loss = loss + args.weight_decay * norm
-            else:
-                if args.increasing_decay:
-                    decays = np.repeat(np.linspace(args.weight_decay/10, args.weight_decay*10, num=54), repeats=3, axis=0)
-                    norm = sum(p.abs().sum() * decay
-                                  for p, decay in zip(model.parameters(), decays)) / 30
-                    loss = loss + norm
-
-                else:
-                    norm = sum(p.abs().sum()
-                                  for p in model.parameters()) / 30
-                    loss = loss + args.weight_decay * norm
-            if args.independence:
-                features = get_embed(model, x)
-                D_z = discriminator_model(features)
-                vae_tc_loss = (D_z[:, :1] - D_z[:, 1:]).mean()
-                loss += vae_tc_loss * 3
-            if args.conditional_independence:
-                features = get_embed(model, x)
-                D_z = discriminator_model(features[torch.where(y==0)])
-                vae_tc_loss = (D_z[:, :1] - D_z[:, 1:]).mean()
-                loss += vae_tc_loss * 3
-                D_z = discriminator_model_2(features[torch.where(y==1)])
-                vae_tc_loss = (D_z[:, :1] - D_z[:, 1:]).mean()
-                loss += vae_tc_loss * 3
+            # --- Methods Start ---
+            # Additional loss to regularize feature space based on method chosen
+            # Contrast
+            if args.method in [1, 2, 3]:
+                random_indices = np.random.choice(len(valset_target), args.batch_size, replace=False)
+                x_b, y_b, _, p_b, _ = valset_target.__getbatch__(random_indices)
+                x_b, y_b, p_b = x_b.cuda(), y_b.cuda(), p_b.cuda()
+                loss += (contrastive_loss(model, x_b, y_b, p_b, args.contrast_temperature, args.method) * args.method_scale)
+            if args.method in [4, 5]:
+                random_indices = np.random.choice(len(valset_target), args.batch_size, replace=False)
+                target_batch = valset_target.__getbatch__(random_indices)
+                loss += coral_loss(model, x, target_batch[0].cuda(), y, target_batch[1].cuda(), args.method) * args.method_scale
+            if args.method == 6:
+                # For y==0
+                loss += correlation_loss(model, x[torch.where(y==0)]) * args.method_scale
+                # For y==1
+                loss += correlation_loss(model, x[torch.where(y==1)]) * args.method_scale
+            # --- Methods Ends ---
 
             loss.backward()
             optimizer.step()
-
-            if args.independence:
-                with torch.no_grad():
-                    features = get_embed(model, x)
-                D_z = discriminator_model(features[:args.batch_size//2])
-                D_z_perm = discriminator_model(permute_dims(features[:args.batch_size // 2]).detach())
-                ones = torch.ones(args.batch_size//2, dtype=torch.long).cuda()
-                zeros = torch.zeros(args.batch_size//2, dtype=torch.long).cuda()
-                D_tc_loss = 0.5 * (F.cross_entropy(D_z, zeros) + F.cross_entropy(D_z_perm, ones))
-                discriminator_optim.zero_grad()
-                D_tc_loss.backward()
-                discriminator_optim.step()
-            if args.conditional_independence:
-                with torch.no_grad():
-                    features = get_embed(model, x)
-                # Train discriminator for y==0
-                size = len(features[torch.where(y==0)]) // 2
-                D_z = discriminator_model(features[torch.where(y==0)][:size])
-                D_z_perm = discriminator_model(permute_dims(features[torch.where(y==0)][size:]).detach())
-                ones = torch.ones(len(D_z_perm), dtype=torch.long).cuda()
-                zeros = torch.zeros(size, dtype=torch.long).cuda()
-                D_tc_loss = 0.5 * (F.cross_entropy(D_z, zeros) + F.cross_entropy(D_z_perm, ones))
-                discriminator_optim.zero_grad()
-                D_tc_loss.backward()
-                discriminator_optim.step()
-
-                # Train discriminator for y==1
-                size = len(features[torch.where(y==1)]) // 2
-                D_z = discriminator_model_2(features[torch.where(y==1)][:size])
-                D_z_perm = discriminator_model_2(permute_dims(features[torch.where(y==1)][size:]).detach())
-                ones = torch.ones(len(D_z_perm), dtype=torch.long).cuda()
-                zeros = torch.zeros(size, dtype=torch.long).cuda()
-                D_tc_loss = 0.5 * (F.cross_entropy(D_z, zeros) + F.cross_entropy(D_z_perm, ones))
-                discriminator_optim_2.zero_grad()
-                D_tc_loss.backward()
-                discriminator_optim_2.step()
 
             loss_meter.update(loss, x.size(0))
             update_dict(acc_groups, y, g, logits)
 
         if args.scheduler:
             scheduler.step()
+        
+        # Save results
         logger.write(f"Epoch {epoch}\t Loss: {loss_meter.avg}\n")
-        results = get_results(acc_groups, get_yp_func)
-        logger.write(f"Train results \n")
-        logger.write(str(results) + "\n")
-        tag = "places_" if args.predict_place else ""
-
-
+        try:
+            results = get_results(acc_groups, get_yp_func)
+            logger.write(f"Train results \n")
+            logger.write(str(results) + "\n")
+        except:
+            print("Zero Division")
+        tag = ""
         if args.multitask:
             results_place = get_results(acc_place_groups, get_yp_func)
             logger.write(f"Train place prediction results \n")
             logger.write(str(results_place) + "\n")
 
-
+        # Evaluation
         if epoch % args.eval_freq == 0:
             # Iterating over datasets we test on
             for test_name, test_loader in test_loader_dict.items():
-                results = evaluate(model, test_loader, get_yp_func, args.multitask, args.predict_place)
-                if args.multitask and test_name == "wb":
-                    results, results_places = results
-                    logger.write("Test results \n")
-                    logger.write(str(results))
-                elif args.multitask:
+                results = evaluate(model, test_loader, get_yp_func, args.multitask)
+                if args.multitask:
                     results, _ = results
-                tag = test_name
-                if test_name == "wb":
-                    tag = "wb_birds" if not args.predict_place else "wb_places"
-                logger.write("Test results \n")
+                logger.write(f"{test_name} results \n")
                 logger.write(str(results))
-
-            torch.save(
-                model.state_dict(), os.path.join(args.output_dir, 'tmp_checkpoint.pt'))
-        # disentanglement_ratio, _ = visualize_activations(None, epoch, model)
-        # logger.write("Disentanglement Ratio \n")
-        # logger.write(str(disentanglement_ratio))
+                logger.write('\n')
+            # Save best model based on worst group accuracy
+            worst_val_acc = min(results["accuracy_0_0"], results["accuracy_0_1"], results["accuracy_1_0"], results["accuracy_1_1"])
+            tune.report(accuracy=worst_val_acc)
+            if worst_val_acc > best_worst_acc:
+                torch.save(
+                    model.state_dict(), os.path.join(args.output_dir, 'best_checkpoint.pt'))
+                best_worst_acc = worst_val_acc
+            tune.report(accuracy=worst_val_acc)
+            
         logger.write('\n')
 
     torch.save(model.state_dict(), os.path.join(args.output_dir, 'final_checkpoint.pt'))
+    # --- Train End ---
+
+    logger.write(f'Best validation worst-group accuracy: {best_worst_acc}')
+    logger.write('\n')
+
+
+if __name__ == "__main__":
+    args = parse_args()
+    main(config=None, args=args)

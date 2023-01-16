@@ -9,19 +9,25 @@ from torch.utils.data.sampler import WeightedRandomSampler
 
 
 class WaterBirdsDataset(Dataset):
-    def __init__(self, basedir, split="train", transform=None):
+    def __init__(self, basedir, split="train", transform=None, indicies=None):
         try:
             split_i = ["train", "val", "test"].index(split)
         except ValueError:
             raise(f"Unknown split {split}")
         metadata_df = pd.read_csv(os.path.join(basedir, "metadata.csv"))
-        print(len(metadata_df))
+        # print(len(metadata_df))
         self.metadata_df = metadata_df[metadata_df["split"] == split_i]
-        print(len(self.metadata_df))
+        # if the indicies is specified, we only obtain the datapoints corresponding to the indicies
+        if indicies is not None:
+            self.metadata_df = self.metadata_df.iloc[indicies]
+        # print(len(self.metadata_df))
         self.basedir = basedir
         self.transform = transform
         self.y_array = self.metadata_df['y'].values
         self.p_array = self.metadata_df['place'].values
+
+
+        # all the variables below are derived from metadata, y, and p
         self.n_classes = np.unique(self.y_array).size
         self.confounder_array = self.metadata_df['place'].values
         self.n_places = np.unique(self.confounder_array).size
@@ -45,13 +51,24 @@ class WaterBirdsDataset(Dataset):
 
         img_path = os.path.join(self.basedir, self.filename_array[idx])
         img = Image.open(img_path).convert('RGB')
-        # img = read_image(img_path)
-        # img = img.float() / 255.
 
         if self.transform:
             img = self.transform(img)
-        return img, y, g, p
+        
+        return img, y, g, p, idx
 
+    def __getbatch__(self, idxs):
+        x_batch, y_batch, g_batch, p_batch, idx_batch = [], [], [], [], []
+        for idx in idxs:
+            x, y, g, p, idx = self.__getitem__(idx)
+            x_batch.append(x)
+            y_batch.append(y)
+            g_batch.append(g)
+            p_batch.append(p)
+            idx_batch.append(idx)
+        return torch.stack(x_batch), torch.flatten(torch.Tensor(np.vstack(y_batch))), torch.flatten(torch.Tensor(np.vstack(g_batch))), \
+         torch.flatten(torch.Tensor(np.vstack(p_batch))), torch.flatten(torch.Tensor(np.vstack(idx_batch)))
+    
     def __getitemrgb__(self, idx):
         y = self.y_array[idx]
         g = self.group_array[idx]
@@ -114,7 +131,7 @@ class WaterBirdsDataset2(Dataset):
         img_transform = self.transform(img)
         return fg_img_transform, bg_img_transform, img_transform
 
-
+        
 def get_transform_cub(target_resolution, train, augment_data):
     scale = 256.0 / 224.0
 

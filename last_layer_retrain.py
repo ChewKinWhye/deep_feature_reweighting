@@ -17,84 +17,25 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 
 from wb_data import WaterBirdsDataset, get_loader, get_transform_cub, log_data
-from utils import Logger, AverageMeter, set_seed, evaluate, get_y_p
+from utils import Logger, AverageMeter, set_seed, evaluate, get_y_p, get_embed
 from visualization import visualize_activations
-
-# Extract embeddings
-def get_embed(m, x):
-    # m = torch.nn.Sequential(*list(m.children())[:-3])
-    # print(m)
-    # x = m(x)
-    x = m.conv1(x)
-    x = m.bn1(x)
-    x = m.relu(x)
-    x = m.maxpool(x)
-    x = m.layer1(x)
-    x = m.layer2(x)
-    x = m.layer3(x)
-
-    x = m.layer4[0](x)
-    x = m.layer4[1](x)
-    # x = m.layer4[2].conv1(x)
-    # x = m.layer4[2].bn1(x)
-    # x = m.layer4[2].conv2(x)
-    # x = m.layer4[2].bn2(x)
-    x = m.layer4[2].relu(x)
-    # x = m.layer4(x)
-    x = m.avgpool(x)
-    x = torch.flatten(x, 1)
-
-    return x
-
-np.set_printoptions(threshold=sys.maxsize)
-
-# WaterBirds
-C_OPTIONS = [0.01, 0.05, 0.1, 0.5, 1, 1.5, 2, 2.5, 3]
-CLASS_WEIGHT_OPTIONS = [1., 2., 3., 10., 100., 300., 1000.]
-# CelebA
-REG = "l1"
-
-CLASS_WEIGHT_OPTIONS = [{0: 1, 1: w} for w in CLASS_WEIGHT_OPTIONS] + [
-        {0: w, 1: 1} for w in CLASS_WEIGHT_OPTIONS]
-
-
-parser = argparse.ArgumentParser(description="Tune and evaluate DFR.")
-parser.add_argument(
-    "--data_dir", type=str,
-    default="/home/bizon/Desktop/KinWhye/BalancingGroups/data/waterbirds/waterbird_complete95_forest2water2",
-    help="Train dataset directory")
-parser.add_argument(
-    "--result_path", type=str, default="logs/",
-    help="Path to save results")
-parser.add_argument(
-    "--ckpt_path", type=str, default=None, help="Checkpoint path")
-parser.add_argument(
-    "--batch_size", type=int, default=100, required=False,
-    help="Checkpoint path")
-parser.add_argument(
-    "--balance_dfr_val", type=bool, default=True, required=False,
-    help="Subset validation to have equal groups for DFR(Val)")
-parser.add_argument(
-    "--notrain_dfr_val", type=bool, default=True, required=False,
-    help="Do not add train data for DFR(Val)")
-args = parser.parse_args()
-
 
 def dfr_on_validation_tune(
         all_embeddings, all_y, all_g, preprocess=True,
-        balance_val=False, add_train=True, num_retrains=30):
+        balance_val=False, num_retrains=30):
 
     worst_accs = {}
     for i in range(num_retrains):
+        # Only use validation data for the last layer retraining
         x_val = all_embeddings["val"]
         y_val = all_y["val"]
         g_val = all_g["val"]
         n_groups = np.max(g_val) + 1
-
         n_val = len(x_val) // 2
         idx = np.arange(len(x_val))
         np.random.shuffle(idx)
 
+        # Split validation data into half
         x_valtrain = x_val[idx[n_val:]]
         y_valtrain = y_val[idx[n_val:]]
         g_valtrain = g_val[idx[n_val:]]
@@ -105,50 +46,41 @@ def dfr_on_validation_tune(
         for g in g_idx:
             np.random.shuffle(g)
         if balance_val:
-            x_valtrain = np.concatenate([x_valtrain[g[:min_g]] for g in g_idx])
-            y_valtrain = np.concatenate([y_valtrain[g[:min_g]] for g in g_idx])
-            g_valtrain = np.concatenate([g_valtrain[g[:min_g]] for g in g_idx])
+            x_train = np.concatenate([x_valtrain[g[:min_g]] for g in g_idx])
+            y_train = np.concatenate([y_valtrain[g[:min_g]] for g in g_idx])
+            g_train = np.concatenate([g_valtrain[g[:min_g]] for g in g_idx])
 
         x_val = x_val[idx[:n_val]]
         y_val = y_val[idx[:n_val]]
         g_val = g_val[idx[:n_val]]
 
-        n_train = len(x_valtrain) if add_train else 0
-
-        x_train = np.concatenate([all_embeddings["train"][:n_train], x_valtrain])
-        y_train = np.concatenate([all_y["train"][:n_train], y_valtrain])
-        g_train = np.concatenate([all_g["train"][:n_train], g_valtrain])
-        # print(np.bincount(g_train))
         if preprocess:
             scaler = StandardScaler()
             x_train = scaler.fit_transform(x_train)
             x_val = scaler.transform(x_val)
 
-
-        cls_w_options = [{0: 1., 1: 1.}]
+        class_weight = {0: 1., 1: 1.}
         for c in C_OPTIONS:
-            for class_weight in cls_w_options:
-                logreg = LogisticRegression(penalty=REG, C=c, solver="liblinear",
-                                            class_weight=class_weight)
-                logreg.fit(x_train, y_train)
-                preds_val = logreg.predict(x_val)
-                group_accs = np.array(
-                    [(preds_val == y_val)[g_val == g].mean()
-                     for g in range(n_groups)])
-                worst_acc = np.min(group_accs)
-                if i == 0:
-                    worst_accs[c, class_weight[0], class_weight[1]] = worst_acc
-                else:
-                    worst_accs[c, class_weight[0], class_weight[1]] += worst_acc
-                # print(c, class_weight[0], class_weight[1], worst_acc, worst_accs[c, class_weight[0], class_weight[1]])
+            logreg = LogisticRegression(penalty=REG, C=c, solver="liblinear",
+                                        class_weight=class_weight)
+            logreg.fit(x_train, y_train)
+            preds_val = logreg.predict(x_val)
+            group_accs = np.array(
+                [(preds_val == y_val)[g_val == g].mean()
+                    for g in range(n_groups)])
+            worst_acc = np.min(group_accs)
+            if i == 0:
+                worst_accs[c] = worst_acc
+            else:
+                worst_accs[c] += worst_acc
     ks, vs = list(worst_accs.keys()), list(worst_accs.values())
     best_hypers = ks[np.argmax(vs)]
     return best_hypers
 
 
 def dfr_on_validation_eval(
-        c, w1, w2, all_embeddings, all_y, all_g, num_retrains=20,
-        preprocess=True, balance_val=False, add_train=True):
+        c, all_embeddings, all_y, all_g, num_retrains=30, w1=1, w2=1,
+        preprocess=True, balance_val=False):
     coefs, intercepts = [], []
     if preprocess:
         scaler = StandardScaler()
@@ -164,20 +96,10 @@ def dfr_on_validation_eval(
         for g in g_idx:
             np.random.shuffle(g)
         if balance_val:
-            x_val = np.concatenate([x_val[g[:min_g]] for g in g_idx])
-            y_val = np.concatenate([y_val[g[:min_g]] for g in g_idx])
-            g_val = np.concatenate([g_val[g[:min_g]] for g in g_idx])
+            x_train = np.concatenate([x_val[g[:min_g]] for g in g_idx])
+            y_train = np.concatenate([y_val[g[:min_g]] for g in g_idx])
+            g_train = np.concatenate([g_val[g[:min_g]] for g in g_idx])
 
-        n_train = len(x_val) if add_train else 0
-        train_idx = np.arange(len(all_embeddings["train"]))
-        np.random.shuffle(train_idx)
-        train_idx = train_idx[:n_train]
-
-        x_train = np.concatenate(
-            [all_embeddings["train"][train_idx], x_val])
-        y_train = np.concatenate([all_y["train"][train_idx], y_val])
-        g_train = np.concatenate([all_g["train"][train_idx], g_val])
-        # print(np.bincount(g_train))
         if preprocess:
             x_train = scaler.transform(x_train)
 
@@ -211,7 +133,34 @@ def dfr_on_validation_eval(
                   for g in range(n_groups)]
     return test_accs, test_mean_acc, train_accs, logreg.coef_
 
-## Load data
+# --- Default Parameters Start ---
+C_OPTIONS = [0.01, 0.05, 0.1, 0.5, 1, 1.5, 2, 2.5, 3]
+REG = "l1"
+# --- Default Parameters End ---
+
+# --- Parser Start ---
+parser = argparse.ArgumentParser(description="Tune and evaluate DFR.")
+parser.add_argument(
+    "--data_dir", type=str,
+    default="/home/bizon/Desktop/KinWhye/BalancingGroups/data/waterbirds/waterbird_complete95_forest2water2",
+    help="Train dataset directory")
+parser.add_argument(
+    "--result_path", type=str, default="logs/",
+    help="Path to save results")
+parser.add_argument(
+    "--ckpt_path", type=str, default=None, help="Checkpoint path")
+parser.add_argument(
+    "--batch_size", type=int, default=100, required=False,
+    help="Checkpoint path")
+parser.add_argument(
+    "--balance_dfr_val", type=bool, default=True, required=False,
+    help="Subset validation to have equal groups for DFR(Val)")
+parser.add_argument("--reduce_dimension", action='store_true', help="Whether the model has reduced dimension")
+
+args = parser.parse_args()
+# --- Parser End ---
+
+## --- Data Start ---
 target_resolution = (224, 224)
 train_transform = get_transform_cub(target_resolution=target_resolution,
                                     train=True, augment_data=False)
@@ -237,38 +186,57 @@ test_loader = get_loader(
 val_loader = get_loader(
     valset, train=False, reweight_groups=None, reweight_classes=None,
     **loader_kwargs)
+# --- Data End ---
 
-# Load model
+# --- Model Start ---
 n_classes = trainset.n_classes
 model = torchvision.models.resnet50(pretrained=False)
 d = model.fc.in_features
-model.fc = torch.nn.Linear(d, n_classes)
+if args.reduce_dimension:
+    # reduce layer reduces the dimenion to 50 before the classification layer
+    model.fc = nn.Sequential(
+    nn.Linear(d, 50),
+    nn.ReLU(),
+    nn.Linear(50, n_classes),
+    )
+else:
+    model.fc = torch.nn.Linear(d, n_classes)
+model.reduce_dimension = args.reduce_dimension
+
 model.load_state_dict(torch.load(
     args.ckpt_path
 ))
 model.cuda()
 model.eval()
+# --- Model End ---
 
-# Evaluate model
-print("Base Model")
+# --- Base Model Evaluation Start ---
+print("Base Model Results")
 base_model_results = {}
 get_yp_func = partial(get_y_p, n_places=trainset.n_places)
-base_model_results["test"] = evaluate(model, test_loader, get_yp_func)
-base_model_results["val"] = evaluate(model, val_loader, get_yp_func)
-base_model_results["train"] = evaluate(model, train_loader, get_yp_func)
+base_model_results["test"] = evaluate(model, test_loader, get_yp_func, silent=True)
+base_model_results["val"] = evaluate(model, val_loader, get_yp_func, silent=True)
+base_model_results["train"] = evaluate(model, train_loader, get_yp_func, silent=True)
 print(base_model_results)
-print()
+# --- Base Model Evaluation End ---
 
+# --- Extract Embeddings Start ---
+print("Extract Embeddings")
 model.eval()
-
 all_embeddings = {}
 all_y, all_p, all_g = {}, {}, {}
 for name, loader in [("train", train_loader), ("test", test_loader), ("val", val_loader)]:
     all_embeddings[name] = []
     all_y[name], all_p[name], all_g[name] = [], [], []
-    for x, y, g, p in tqdm.tqdm(loader):
+    for x, y, g, p, idxs in tqdm.tqdm(loader, disable=True):
         with torch.no_grad():
-            all_embeddings[name].append(get_embed(model, x.cuda()).detach().cpu().numpy())
+            # print(get_embed(model, x.cuda()).detach().cpu().numpy().shape)
+            emb = get_embed(model, x.cuda()).detach().cpu().numpy()
+            # Only do retraining on subset of last layer features
+            # dividing_point = emb.shape[1]//10 * 9
+            # emb = emb[:, :dividing_point]
+
+            all_embeddings[name].append(emb)
             all_y[name].append(y.detach().cpu().numpy())
             all_g[name].append(g.detach().cpu().numpy())
             all_p[name].append(p.detach().cpu().numpy())
@@ -276,24 +244,37 @@ for name, loader in [("train", train_loader), ("test", test_loader), ("val", val
     all_y[name] = np.concatenate(all_y[name])
     all_g[name] = np.concatenate(all_g[name])
     all_p[name] = np.concatenate(all_p[name])
-print(get_embed(model, x.cuda()).detach().cpu().numpy().shape)
+# print(f"Embedding Shape: {get_embed(model, x.cuda()).detach().cpu().numpy().shape}")
+# --- Extract Embeddings End ---
 
 # DFR on validation
-print("DFR on validation")
+print("Validation Tune")
 dfr_val_results = {}
-c, w1, w2 = dfr_on_validation_tune(
+c = dfr_on_validation_tune(
     all_embeddings, all_y, all_g,
-    balance_val=args.balance_dfr_val, add_train=not args.notrain_dfr_val)
-dfr_val_results["best_hypers"] = (c, w1, w2)
-print("Hypers:", (c, w1, w2))
+    balance_val=args.balance_dfr_val)
+
+dfr_val_results["best_hypers"] = c
+print("Best C value:", c)
+
+print("Validation Test")
 test_accs, test_mean_acc, train_accs, coefs = dfr_on_validation_eval(
-        c, w1, w2, all_embeddings, all_y, all_g,
-    balance_val=args.balance_dfr_val, add_train=not args.notrain_dfr_val)
+        c, all_embeddings, all_y, all_g,
+    balance_val=args.balance_dfr_val)
 dfr_val_results["test_accs"] = test_accs
 dfr_val_results["train_accs"] = train_accs
 dfr_val_results["test_worst_acc"] = np.min(test_accs)
 dfr_val_results["test_mean_acc"] = test_mean_acc
+# dividing_point = emb.shape[1]//10 * 9
+# print(np.mean(np.abs(coefs[0][:dividing_point])))
+# print(np.mean(np.abs(coefs[0][dividing_point:])))
+
 print(dfr_val_results)
+
+# with open("coefs.txt", "w") as f:
+#     for coef in coefs[0]:
+#         f.write(f"{coef} ")
+
 # disentanglement_ratio, layer_ratio = visualize_activations(None, None, model)
 # # print(np.where(coefs[0] == 0)[0])
 # # print(np.where(coefs[0] != 0)[0])
