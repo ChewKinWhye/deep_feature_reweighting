@@ -24,6 +24,7 @@ from torchsummary import summary
 import torch.nn as nn
 import torch.nn.init as init
 import torch.nn.functional as F
+from methods.weight_methods import WeightMethods
 
 VAL_SIZE = 1199
 
@@ -117,14 +118,18 @@ def main(config=None, args=None):
     if args.method in [1, 2, 3, 4, 5, 7]:
         indicies = np.arange(VAL_SIZE)
         np.random.shuffle(indicies)
+        # First half for val
         indicies_val = indicies[:len(indicies)//2]
+        # Second half for target
         indicies_target = indicies[len(indicies)//2:]
+        # Save validation indicies just in case it is needed
         with open(os.path.join(args.output_dir, "indicies_val.npy"), "wb") as f:
             np.save(f, indicies_val)
+        # Obtain target set
         valset_target = WaterBirdsDataset(basedir=basedir, split="val", transform=train_transform, indicies=indicies_target)
     # Otherwise we simply use the entire validation dataset
     else:
-        indicies_val = np.arange(len(testset_dict["Validation"]))
+        indicies_val = np.arange(VAL_SIZE)
         valset_target = None
 
     trainset = WaterBirdsDataset(basedir=basedir, split="train", transform=train_transform)
@@ -170,12 +175,18 @@ def main(config=None, args=None):
     criterion = torch.nn.CrossEntropyLoss()
     # --- Model End ---
 
+    # For method 7: NashMTL
+    weight_methods_parameters = {'update_weights_every': 1, 'optim_niter': 20}
+    weight_method = WeightMethods("nashmtl", n_tasks=2, device=torch.device('cuda'), **weight_methods_parameters)
+
     # --- Train Start ---
     best_worst_acc = 0
+
     for epoch in range(args.num_epochs):
         model.train()
         # Track metrics
         loss_meter = AverageMeter()
+        method_loss_meter = AverageMeter()
         acc_groups = {g_idx : AverageMeter() for g_idx in range(trainset.n_groups)}
         if args.multitask:
             acc_place_groups = {g_idx: AverageMeter() for g_idx in range(trainset.n_groups)}
@@ -184,6 +195,7 @@ def main(config=None, args=None):
             # Data
             x, y, g, p, idxs = batch
             x, y, p = x.cuda(), y.cuda(), p.cuda()
+            method_loss = 0
             # Forward pass
             optimizer.zero_grad()
             logits = model(x)
@@ -201,21 +213,42 @@ def main(config=None, args=None):
                 random_indices = np.random.choice(len(valset_target), args.batch_size, replace=False)
                 x_b, y_b, _, p_b, _ = valset_target.__getbatch__(random_indices)
                 x_b, y_b, p_b = x_b.cuda(), y_b.cuda(), p_b.cuda()
-                loss += (contrastive_loss(model, x_b, y_b, p_b, args.contrast_temperature, args.method) * args.method_scale)
-            if args.method in [4, 5]:
+                method_loss = (contrastive_loss(model, x_b, y_b, p_b, args.contrast_temperature, args.method) * args.method_scale)
+            elif args.method in [4, 5]:
                 random_indices = np.random.choice(len(valset_target), args.batch_size, replace=False)
                 target_batch = valset_target.__getbatch__(random_indices)
-                loss += coral_loss(model, x, target_batch[0].cuda(), y, target_batch[1].cuda(), args.method) * args.method_scale
-            if args.method == 6:
+                method_loss = coral_loss(model, x, target_batch[0].cuda(), y, target_batch[1].cuda(), args.method) * args.method_scale
+            elif args.method == 6:
                 # For y==0
-                loss += correlation_loss(model, x[torch.where(y==0)]) * args.method_scale
+                method_loss = correlation_loss(model, x[torch.where(y==0)]) * args.method_scale
                 # For y==1
-                loss += correlation_loss(model, x[torch.where(y==1)]) * args.method_scale
+                method_loss += correlation_loss(model, x[torch.where(y==1)]) * args.method_scale
             # --- Methods Ends ---
-
-            loss.backward()
+            if args.method == 7:
+                random_indices = np.random.choice(len(valset_target), args.batch_size, replace=False)
+                x_b, y_b, _, p_b, _ = valset_target.__getbatch__(random_indices)
+                x_b, y_b, p_b = x_b.cuda(), y_b.type(torch.LongTensor).cuda(), p_b.cuda()
+                method_loss = criterion(logits_b, y_b)
+                logits_b = model(x_b)
+                losses = torch.stack(
+                    (
+                        loss,
+                        method_loss,
+                    )
+                )
+                # print(losses)
+                weight_method.backward(
+                    losses=losses,
+                    shared_parameters=list(model.parameters()),
+                    task_specific_parameters=None,
+                    last_shared_parameters=None,
+                    representation=None,
+                )           
+            else:
+                total_loss = loss + method_loss
+                total_loss.backward()
             optimizer.step()
-
+            method_loss_meter.update(method_loss, x.size(0))
             loss_meter.update(loss, x.size(0))
             update_dict(acc_groups, y, g, logits)
 
@@ -223,7 +256,7 @@ def main(config=None, args=None):
             scheduler.step()
         
         # Save results
-        logger.write(f"Epoch {epoch}\t Loss: {loss_meter.avg}\n")
+        logger.write(f"Epoch {epoch}\t ERM Loss: {loss_meter.avg}\t Method Loss: {method_loss_meter}\n")
         try:
             results = get_results(acc_groups, get_yp_func)
             logger.write(f"Train results \n")
@@ -248,12 +281,10 @@ def main(config=None, args=None):
                 logger.write('\n')
             # Save best model based on worst group accuracy
             worst_val_acc = min(results["accuracy_0_0"], results["accuracy_0_1"], results["accuracy_1_0"], results["accuracy_1_1"])
-            tune.report(accuracy=worst_val_acc)
             if worst_val_acc > best_worst_acc:
                 torch.save(
                     model.state_dict(), os.path.join(args.output_dir, 'best_checkpoint.pt'))
                 best_worst_acc = worst_val_acc
-            tune.report(accuracy=worst_val_acc)
             
         logger.write('\n')
 
