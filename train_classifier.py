@@ -6,24 +6,15 @@ import os
 import tqdm
 import argparse
 import sys
-from collections import defaultdict
 import json
 from functools import partial
-import math
 from wb_data import WaterBirdsDataset, get_loader, get_transform_cub, log_data
 from argparse import Namespace
-from ray import tune
 
 from utils import MultiTaskHead, Discriminator
 from utils import Logger, AverageMeter, set_seed, evaluate, get_y_p
 from utils import update_dict, get_results, write_dict_to_tb
-from utils import kaiming_init, normal_init, get_embed, permute_dims
 from utils import feature_reg_loss_specific, contrastive_loss, retain_feature_loss, coral_loss, correlation_loss, MTL_Loss
-from visualization import visualize_activations
-from torchsummary import summary
-import torch.nn as nn
-import torch.nn.init as init
-import torch.nn.functional as F
 from methods.weight_methods import WeightMethods
 
 VAL_SIZE = 1199
@@ -84,13 +75,7 @@ def parse_args():
     return args
 
 # parameters in config overwrites the parser arguments
-def main(config=None, args=None):
-    if config is not None:
-        args = vars(args)
-        for key, value in config.items():
-            args[key] = value
-        args = Namespace(**args)
-        print(args)
+def main(args):
     # --- Logger Start ---
     print('Preparing directory %s' % args.output_dir)
     os.makedirs(args.output_dir, exist_ok=True)
@@ -228,6 +213,7 @@ def main(config=None, args=None):
                 random_indices = np.random.choice(len(valset_target), args.batch_size, replace=False)
                 x_b, y_b, _, p_b, _ = valset_target.__getbatch__(random_indices)
                 x_b, y_b, p_b = x_b.cuda(), y_b.type(torch.LongTensor).cuda(), p_b.cuda()
+                logits_b = model(x_b)
                 method_loss = criterion(logits_b, y_b)
                 logits_b = model(x_b)
                 losses = torch.stack(
@@ -256,7 +242,7 @@ def main(config=None, args=None):
             scheduler.step()
         
         # Save results
-        logger.write(f"Epoch {epoch}\t ERM Loss: {loss_meter.avg}\t Method Loss: {method_loss_meter}\n")
+        logger.write(f"Epoch {epoch}\t ERM Loss: {loss_meter.avg}\t Method Loss: {method_loss_meter.avg}\n")
         try:
             results = get_results(acc_groups, get_yp_func)
             logger.write(f"Train results \n")
@@ -297,4 +283,4 @@ def main(config=None, args=None):
 
 if __name__ == "__main__":
     args = parse_args()
-    main(config=None, args=args)
+    main(args=args)
