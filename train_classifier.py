@@ -10,7 +10,7 @@ import json
 from functools import partial
 from wb_data import WaterBirdsDataset, get_loader, get_transform_cub, log_data
 from argparse import Namespace
-
+from BalancedOptimizer import BalancedOptimizer
 from utils import MultiTaskHead, Discriminator
 from utils import Logger, AverageMeter, set_seed, evaluate, get_y_p
 from utils import update_dict, get_results, write_dict_to_tb
@@ -63,6 +63,7 @@ def parse_args():
     # Method 5: Conditional Coral
     # Method 6: Conditional Independence via Correlation Matrix
     # Method 7: MTL
+    # Method 8: Learning Rate Regularization
     # Scale of the methods
     parser.add_argument("--contrast_temperature", type=float, default=0.5, help="contrast the other half of the feature space inversely")
     parser.add_argument("--method_scale", type=float, default=0.1, help="Scale of feature regularization")
@@ -100,7 +101,7 @@ def main(args):
     test_transform = get_transform_cub(target_resolution=target_resolution, train=False, augment_data=args.augment_data)
 
     # For methods that require the target dataset, we split the validation set into two
-    if args.method in [1, 2, 3, 4, 5, 7]:
+    if args.method in [1, 2, 3, 4, 5, 7, 8]:
         indicies = np.arange(VAL_SIZE)
         np.random.shuffle(indicies)
         # First half for val
@@ -149,8 +150,11 @@ def main(args):
         model.fc = MultiTaskHead(d, [n_classes, trainset.n_places])
     model.cuda()
 
-    optimizer = torch.optim.SGD(
-        model.parameters(), lr=args.init_lr, momentum=args.momentum_decay, weight_decay=args.weight_decay)
+    if args.method == 8:
+        optimizer = BalancedOptimizer(model.parameters(), lr=args.init_lr, weight_decay=args.weight_decay)
+    else:
+        optimizer = torch.optim.SGD(
+            model.parameters(), lr=args.init_lr, momentum=args.momentum_decay, weight_decay=args.weight_decay)
     if args.scheduler:
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             optimizer, T_max=args.num_epochs)
@@ -183,39 +187,38 @@ def main(args):
             method_loss = 0
             # Forward pass
             optimizer.zero_grad()
-            logits = model(x)
-            if args.multitask:
-                logits, logits_place = logits
-                loss = criterion(logits, y) + criterion(logits_place, p)
-                update_dict(acc_place_groups, p, g, logits_place)
-            else:
-                loss = criterion(logits, y)
-
             # --- Methods Start ---
             # Additional loss to regularize feature space based on method chosen
             # Contrast
-            if args.method in [1, 2, 3]:
-                random_indices = np.random.choice(len(valset_target), args.batch_size, replace=False)
-                x_b, y_b, _, p_b, _ = valset_target.__getbatch__(random_indices)
-                x_b, y_b, p_b = x_b.cuda(), y_b.cuda(), p_b.cuda()
-                method_loss = (contrastive_loss(model, x_b, y_b, p_b, args.contrast_temperature, args.method) * args.method_scale)
-            elif args.method in [4, 5]:
-                random_indices = np.random.choice(len(valset_target), args.batch_size, replace=False)
-                target_batch = valset_target.__getbatch__(random_indices)
-                method_loss = coral_loss(model, x, target_batch[0].cuda(), y, target_batch[1].cuda(), args.method) * args.method_scale
-            elif args.method == 6:
-                # For y==0
-                method_loss = correlation_loss(model, x[torch.where(y==0)]) * args.method_scale
-                # For y==1
-                method_loss += correlation_loss(model, x[torch.where(y==1)]) * args.method_scale
-            # --- Methods Ends ---
-            if args.method == 7:
+            if args.method in [1, 2, 3, 4, 5, 6]:
+                logits = model(x)
+                loss = criterion(logits, y)
+                if args.method in [1, 2, 3]:
+                    random_indices = np.random.choice(len(valset_target), args.batch_size, replace=False)
+                    x_b, y_b, _, p_b, _ = valset_target.__getbatch__(random_indices)
+                    x_b, y_b, p_b = x_b.cuda(), y_b.cuda(), p_b.cuda()
+                    method_loss = (contrastive_loss(model, x_b, y_b, p_b, args.contrast_temperature, args.method) * args.method_scale)
+                elif args.method in [4, 5]:
+                    random_indices = np.random.choice(len(valset_target), args.batch_size, replace=False)
+                    target_batch = valset_target.__getbatch__(random_indices)
+                    method_loss = coral_loss(model, x, target_batch[0].cuda(), y, target_batch[1].cuda(), args.method) * args.method_scale
+                elif args.method == 6:
+                    # For y==0
+                    method_loss = correlation_loss(model, x[torch.where(y==0)]) * args.method_scale
+                    # For y==1
+                    method_loss += correlation_loss(model, x[torch.where(y==1)]) * args.method_scale
+                total_loss = loss + method_loss
+                total_loss.backward()
+
+            elif args.method == 7:
+                logits = model(x)
+                loss = criterion(logits, y)
+
                 random_indices = np.random.choice(len(valset_target), args.batch_size, replace=False)
                 x_b, y_b, _, p_b, _ = valset_target.__getbatch__(random_indices)
                 x_b, y_b, p_b = x_b.cuda(), y_b.type(torch.LongTensor).cuda(), p_b.cuda()
                 logits_b = model(x_b)
                 method_loss = criterion(logits_b, y_b)
-                logits_b = model(x_b)
                 losses = torch.stack(
                     (
                         loss,
@@ -230,9 +233,27 @@ def main(args):
                     last_shared_parameters=None,
                     representation=None,
                 )           
-            else:
-                total_loss = loss + method_loss
-                total_loss.backward()
+            elif args.method == 8:
+                # Store gradients for train
+                logits = model(x)
+                loss = criterion(logits, y)
+                loss.backward()
+                optimizer.store_gradients("train")
+                optimizer.zero_grad()
+                
+                random_indices = np.random.choice(len(valset_target), args.batch_size, replace=False)
+                x_b, y_b, _, p_b, _ = valset_target.__getbatch__(random_indices)
+                x_b, y_b, p_b = x_b.cuda(), y_b.type(torch.LongTensor).cuda(), p_b.cuda()
+                logits_b = model(x_b)
+                method_loss = criterion(logits_b, y_b)
+
+                # Accumulate the minority loss gradients
+                method_loss.backward()
+                optimizer.store_gradients("balanced")
+                optimizer.zero_grad()
+
+            # --- Methods Ends ---
+
             optimizer.step()
             method_loss_meter.update(method_loss, x.size(0))
             loss_meter.update(loss, x.size(0))
