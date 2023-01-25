@@ -18,7 +18,7 @@ from sklearn.preprocessing import StandardScaler
 
 from wb_data import WaterBirdsDataset, get_loader, get_transform_cub, log_data
 from utils import Logger, AverageMeter, set_seed, evaluate, get_y_p, get_embed
-from visualization import visualize_activations
+#from visualization import visualize_activations
 
 def dfr_on_validation_tune(
         all_embeddings, all_y, all_g, preprocess=True,

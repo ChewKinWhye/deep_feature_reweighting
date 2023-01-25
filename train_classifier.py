@@ -12,15 +12,15 @@ from functools import partial
 import math
 from wb_data import WaterBirdsDataset, get_loader, get_transform_cub, log_data
 from argparse import Namespace
-from ray import tune
+#from ray import tune
 
 from utils import MultiTaskHead, Discriminator
 from utils import Logger, AverageMeter, set_seed, evaluate, get_y_p
 from utils import update_dict, get_results, write_dict_to_tb
 from utils import kaiming_init, normal_init, get_embed, permute_dims
 from utils import feature_reg_loss_specific, contrastive_loss, retain_feature_loss, coral_loss, correlation_loss, MTL_Loss
-from visualization import visualize_activations
-from torchsummary import summary
+#from visualization import visualize_activations
+#from torchsummary import summary
 import torch.nn as nn
 import torch.nn.init as init
 import torch.nn.functional as F
@@ -75,7 +75,6 @@ def parse_args():
     # Scale of the methods
     parser.add_argument("--contrast_temperature", type=float, default=0.5, help="contrast the other half of the feature space inversely")
     parser.add_argument("--method_scale", type=float, default=0.1, help="Scale of feature regularization")
-    parser.add_argument("--method_dataset", type=float, default=0.1, help="Scale of feature regularization")
 
 
     args = parser.parse_args()
@@ -84,13 +83,7 @@ def parse_args():
     return args
 
 # parameters in config overwrites the parser arguments
-def main(config=None, args=None):
-    if config is not None:
-        args = vars(args)
-        for key, value in config.items():
-            args[key] = value
-        args = Namespace(**args)
-        print(args)
+def main(args=None):
     # --- Logger Start ---
     print('Preparing directory %s' % args.output_dir)
     os.makedirs(args.output_dir, exist_ok=True)
@@ -256,7 +249,7 @@ def main(config=None, args=None):
             scheduler.step()
         
         # Save results
-        logger.write(f"Epoch {epoch}\t ERM Loss: {loss_meter.avg}\t Method Loss: {method_loss_meter}\n")
+        logger.write(f"Epoch {epoch}\t ERM Loss: {loss_meter.avg}\t Method Loss: {method_loss_meter.avg}\n")
         try:
             results = get_results(acc_groups, get_yp_func)
             logger.write(f"Train results \n")
@@ -297,4 +290,4 @@ def main(config=None, args=None):
 
 if __name__ == "__main__":
     args = parse_args()
-    main(config=None, args=args)
+    main(args=args)

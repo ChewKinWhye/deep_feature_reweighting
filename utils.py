@@ -293,18 +293,18 @@ def coral_loss(model, x_s, x_t, y_s, y_t, method):
         d_t = get_embed(model, x_t)
         c_t = torch.cov(d_t.T)
 
-        loss = torch.norm(torch.square(c_s-c_t), p='fro') / 100
+        loss = torch.norm(torch.square(c_s-c_t), p='fro') / 10
     else:
         d_s = get_embed(model, x_s[torch.where(y_s==0)])
         c_s = torch.cov(d_s.T)
         d_t = get_embed(model, x_t[torch.where(y_t==0)])
         c_t = torch.cov(d_t.T)
-        loss = torch.norm(torch.square(c_s-c_t), p='fro') / 100
+        loss = torch.norm(torch.square(c_s-c_t), p='fro') / 10
         d_s = get_embed(model, x_s[torch.where(y_s==1)])
         c_s = torch.cov(d_s.T)
         d_t = get_embed(model, x_t[torch.where(y_t==1)])
         c_t = torch.cov(d_t.T)
-        loss += torch.norm(torch.square(c_s-c_t), p='fro') / 100
+        loss += torch.norm(torch.square(c_s-c_t), p='fro') / 10
         if torch.isnan(loss):
             return 0
     return loss
