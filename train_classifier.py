@@ -44,7 +44,7 @@ def parse_args():
     parser.add_argument("--reweight_groups", action='store_true', help="Reweight groups")
     parser.add_argument("--augment_data", action='store_true', help="Train data augmentation")
     parser.add_argument("--multitask", action='store_true', help="Predict label and group")
-
+    parser.add_argument("--remove_minority", action='store_true', help="Remove the minority examples, making the spurious correlation 100%")
     # Training
     parser.add_argument("--scheduler", action='store_true', help="Learning rate scheduler")
     parser.add_argument("--batch_size", type=int, default=128)
@@ -121,6 +121,19 @@ def main(args):
         valset_target = None
 
     trainset = WaterBirdsDataset(basedir=basedir, split="train", transform=train_transform)
+    if args.remove_minority > 0:
+        print("Removing minority groups")
+        print("Initial groups", np.bincount(trainset.group_array))
+        group_counts = trainset.group_counts
+        minority_groups = np.argsort(group_counts.numpy())[:2]
+        idx = np.where(np.logical_and.reduce([trainset.group_array != g for g in minority_groups], initial=True))[0]
+        trainset.y_array = trainset.y_array[idx]
+        trainset.group_array = trainset.group_array[idx]
+        trainset.confounder_array = trainset.confounder_array[idx]
+        trainset.filename_array = trainset.filename_array[idx]
+        trainset.metadata_df = trainset.metadata_df.iloc[idx]
+        print("Final groups", np.bincount(trainset.group_array))
+
     testset_dict = {
         'Test': WaterBirdsDataset(basedir=basedir, split="test", transform=test_transform),
         'Validation': WaterBirdsDataset(basedir=basedir, split="val", transform=test_transform, indicies=indicies_val),
