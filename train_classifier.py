@@ -166,7 +166,7 @@ def main(args):
     model.cuda()
 
     if args.method == 8:
-        optimizer = BalancedOptimizer(model.parameters(), lr=args.init_lr, weight_decay=args.weight_decay)
+        optimizer = BalancedOptimizer(model.parameters(), lr=args.init_lr, momentum=args.momentum_decay, weight_decay=args.weight_decay)
     else:
         optimizer = torch.optim.SGD(
             model.parameters(), lr=args.init_lr, momentum=args.momentum_decay, weight_decay=args.weight_decay)
@@ -253,7 +253,7 @@ def main(args):
                 logits = model(x)
                 loss = criterion(logits, y)
                 loss.backward()
-                optimizer.store_gradients("train")
+                optimizer.store_gradients("main")
                 optimizer.zero_grad()
                 
                 random_indices = np.random.choice(len(valset_target), args.batch_size, replace=False)
