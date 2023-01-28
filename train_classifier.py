@@ -146,10 +146,23 @@ def main(args):
     elif args.dataset == "cmnist":
         target_resolution = (32, 32)
         trainset, valset_target, testset_dict = get_cmnist(target_resolution, VAL_SIZE, indicies_val, indicies_target)
-    print(trainset.__len__())
-    print(valset_target.__len__())
-    print(testset_dict["Test"].__len__())
-    print(testset_dict["Validation"].__len__())
+    
+    # Print dataset statistics
+    # print(f"Length of training dataset: {trainset.__len__()}")
+    # if valset_target is None:
+    #     print("No target dataset")
+    # else:
+    #     print(f"Length of target dataset: {valset_target.__len__()}")
+    # print(f"Length of test dataset: {testset_dict['Test'].__len__()}")
+    # print(f"Length of validation dataset: {testset_dict['Validation'].__len__()}")
+    # print(f"Input Shape: {trainset.__getitem__(0)[0].size()}")
+    # print(f"Number of classes: {testset_dict['Validation'].n_classes}")
+    # print(f"Number of places: {testset_dict['Validation'].n_places}")
+    # print(f"Number of groups: {testset_dict['Validation'].n_groups}")
+
+    # print(f"Class counts: {testset_dict['Validation'].y_counts}")
+    # print(f"Place counts: {testset_dict['Validation'].p_counts}")
+    # print(f"Group counts: {testset_dict['Validation'].group_counts}")
 
     # For methods that use the validation dataset, the validation dataset is split into two, one for training and the other for tuning
 
