@@ -8,7 +8,7 @@ import argparse
 import sys
 import json
 from functools import partial
-from wb_data import WaterBirdsDataset, get_loader, get_transform_cub, log_data
+from wb_data import WaterBirdsDataset, get_loader, wb_transform, log_data
 from argparse import Namespace
 from BalancedOptimizer import BalancedOptimizer
 from utils import MultiTaskHead, Discriminator
@@ -19,13 +19,14 @@ import torch.nn as nn
 import torch.nn.init as init
 import torch.nn.functional as F
 from methods.weight_methods import WeightMethods
+from cmnist import get_cmnist
 
-VAL_SIZE = 1199
 
 def parse_args():
         # --- Parser Start ---
     parser = argparse.ArgumentParser(description="Train model on waterbirds data")
     # Data Directory
+    parser.add_argument("--dataset", type=str, default="waterbirds", help="Which dataset to use: [waterbirds, cmnist, mdominoes, cdominoes")
     parser.add_argument(
         "--data_dir", type=str,
         default="/home/bizon/Desktop/KinWhye/BalancingGroups/data/waterbirds/waterbird_complete95_forest2water2",
@@ -97,12 +98,12 @@ def main(args):
 
     # --- Data Start ---
     splits = ["train", "test", "val"]
-    basedir = args.data_dir
-    target_resolution = (224, 224)
-    train_transform = get_transform_cub(target_resolution=target_resolution, train=True, augment_data=args.augment_data)
-    test_transform = get_transform_cub(target_resolution=target_resolution, train=False, augment_data=args.augment_data)
-
     # For methods that require the target dataset, we split the validation set into two
+    if args.dataset == "waterbirds":
+        VAL_SIZE = 1199
+    else:
+        VAL_SIZE = 6000
+
     if args.method in [1, 2, 3, 4, 5, 7, 8]:
         indicies = np.arange(VAL_SIZE)
         np.random.shuffle(indicies)
@@ -110,34 +111,46 @@ def main(args):
         indicies_val = indicies[:len(indicies)//2]
         # Second half for target
         indicies_target = indicies[len(indicies)//2:]
-        # Save validation indicies just in case it is needed
-        with open(os.path.join(args.output_dir, "indicies_val.npy"), "wb") as f:
-            np.save(f, indicies_val)
-        # Obtain target set
-        valset_target = WaterBirdsDataset(basedir=basedir, split="val", transform=train_transform, indicies=indicies_target)
     # Otherwise we simply use the entire validation dataset
     else:
         indicies_val = np.arange(VAL_SIZE)
-        valset_target = None
+        indicies_target = None
+    
+    # Obtain trainset, valset_target, and testset_dict
+    if args.dataset == "waterbirds":
+        target_resolution = (224, 224)
+        train_transform = wb_transform(target_resolution=target_resolution, train=True, augment_data=args.augment_data)
+        test_transform = wb_transform(target_resolution=target_resolution, train=False, augment_data=args.augment_data)
+        trainset = WaterBirdsDataset(basedir=args.data_dir, split="train", transform=train_transform)
+        if indicies_target is not None:
+            valset_target = WaterBirdsDataset(basedir=args.data_dir, split="val", transform=train_transform, indicies=indicies_target)
+        else:
+            valset_target = None
+        if args.remove_minority > 0:
+            print("Removing minority groups")
+            print("Initial groups", np.bincount(trainset.group_array))
+            group_counts = trainset.group_counts
+            minority_groups = np.argsort(group_counts.numpy())[:2]
+            idx = np.where(np.logical_and.reduce([trainset.group_array != g for g in minority_groups], initial=True))[0]
+            trainset.y_array = trainset.y_array[idx]
+            trainset.group_array = trainset.group_array[idx]
+            trainset.confounder_array = trainset.confounder_array[idx]
+            trainset.filename_array = trainset.filename_array[idx]
+            trainset.metadata_df = trainset.metadata_df.iloc[idx]
+            print("Final groups", np.bincount(trainset.group_array))
+        testset_dict = {
+            'Test': WaterBirdsDataset(basedir=args.data_dir, split="test", transform=test_transform),
+            'Validation': WaterBirdsDataset(basedir=args.data_dir, split="val", transform=test_transform, indicies=indicies_val),
+        }
 
-    trainset = WaterBirdsDataset(basedir=basedir, split="train", transform=train_transform)
-    if args.remove_minority > 0:
-        print("Removing minority groups")
-        print("Initial groups", np.bincount(trainset.group_array))
-        group_counts = trainset.group_counts
-        minority_groups = np.argsort(group_counts.numpy())[:2]
-        idx = np.where(np.logical_and.reduce([trainset.group_array != g for g in minority_groups], initial=True))[0]
-        trainset.y_array = trainset.y_array[idx]
-        trainset.group_array = trainset.group_array[idx]
-        trainset.confounder_array = trainset.confounder_array[idx]
-        trainset.filename_array = trainset.filename_array[idx]
-        trainset.metadata_df = trainset.metadata_df.iloc[idx]
-        print("Final groups", np.bincount(trainset.group_array))
+    elif args.dataset == "cmnist":
+        target_resolution = (32, 32)
+        trainset, valset_target, testset_dict = get_cmnist(target_resolution, VAL_SIZE, indicies_val, indicies_target)
+    print(trainset.__len__())
+    print(valset_target.__len__())
+    print(testset_dict["Test"].__len__())
+    print(testset_dict["Validation"].__len__())
 
-    testset_dict = {
-        'Test': WaterBirdsDataset(basedir=basedir, split="test", transform=test_transform),
-        'Validation': WaterBirdsDataset(basedir=basedir, split="val", transform=test_transform, indicies=indicies_val),
-    }
     # For methods that use the validation dataset, the validation dataset is split into two, one for training and the other for tuning
 
     loader_kwargs = {'batch_size': args.batch_size, 'num_workers': 4, 'pin_memory': True}
@@ -156,8 +169,10 @@ def main(args):
 
     # --- Model Start ---
     n_classes = trainset.n_classes
-    model = torchvision.models.resnet50(pretrained=args.pretrained_model)
-
+    if args.dataset == "waterbirds":
+        model = torchvision.models.resnet50(pretrained=args.pretrained_model)
+    else:
+        model = torchvision.models.resnet18(pretrained=args.pretrained_model)
     d = model.fc.in_features
     if not args.multitask:
         model.fc = torch.nn.Linear(d, n_classes)
