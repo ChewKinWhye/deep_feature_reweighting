@@ -19,34 +19,38 @@ import torchvision.transforms as transforms
 
 from matplotlib.ticker import NullFormatter
 
-def color_train_digits(X, Y):
+def color_train_digits(X, Y, spurious_strength):
     res = []
     for x, y in zip(X, Y):
         x = x / 255
         mask = x.view(28,28) > 0.1
         img = x.repeat(3, 1, 1)
-        if y == 0:
+        if rnd.random() <= spurious_strength:
+            color_idx = y
+        else:
+            color_idx = rnd.randint(0, 9)
+        if color_idx == 0:
             img[0][mask] *= 0.5
-        elif y == 1:
+        elif color_idx == 1:
             img[1][mask] *= 0.5
-        elif y == 2:
+        elif color_idx == 2:
             img[2][mask] *= 0.5
-        elif y == 3:
+        elif color_idx == 3:
             img[0][mask] *= 0.2
             img[1][mask] *= 0.2
-        elif y == 4:
+        elif color_idx == 4:
             img[0][mask] *= 0.1
             img[2][mask] *= 0.1
-        elif y == 5:
+        elif color_idx == 5:
             img[1][mask] *= 0.6
             img[2][mask] *= 0.
-        elif y == 6:
+        elif color_idx == 6:
             img[1][mask] *= 0.3
             img[2][mask] *= 0.2
-        elif y == 7:
+        elif color_idx == 7:
             img[0][mask] *= 0.
             img[2][mask] *= 0.6
-        elif y == 8:
+        elif color_idx == 8:
             img[0][mask] *= 0.5
             img[1][mask] *= 0.2
         else:
@@ -146,10 +150,10 @@ class CMNIST(Dataset):
          torch.flatten(torch.Tensor(np.vstack(p_batch))), torch.flatten(torch.Tensor(np.vstack(idx_batch)))
 
 
-def get_cmnist(target_resolution, VAL_SIZE, indicies_val, indicies_target):
+def get_cmnist(target_resolution, VAL_SIZE, spurious_strength, indicies_val, indicies_target):
     # Train
-    train_set = torchvision.datasets.MNIST('./data/mnist/', train = True, download = True)
-    train_input  = train_set.data.view(-1, 1, 28, 28).float()
+    train_set = torchvision.datasets.MNIST('./data/mnist/', train=True, download=True)
+    train_input = train_set.data.view(-1, 1, 28, 28).float()
     train_target = train_set.targets
     rand_perm = torch.randperm(len(train_input))
     train_input = train_input[rand_perm]
@@ -163,7 +167,7 @@ def get_cmnist(target_resolution, VAL_SIZE, indicies_val, indicies_target):
     train_input, train_target = train_input[VAL_SIZE:], train_target[VAL_SIZE:]
 
     # Test
-    test_set = torchvision.datasets.MNIST('./data/mnist/', train = False, download = True)
+    test_set = torchvision.datasets.MNIST('./data/mnist/', train=False, download=True)
     test_input = test_set.data.view(-1, 1, 28, 28).float()
     test_target = test_set.targets
     rand_perm = torch.randperm(len(test_input))
@@ -171,7 +175,7 @@ def get_cmnist(target_resolution, VAL_SIZE, indicies_val, indicies_target):
     test_target = test_target[rand_perm]
 
     # Color Images
-    train_input, train_p = color_train_digits(train_input, train_target)
+    train_input, train_p = color_train_digits(train_input, train_target, spurious_strength)
     val_input, val_p = color_test_digits(val_input, val_target)
     test_input, test_p = color_test_digits(test_input, test_target)
     if indicies_target is not None:

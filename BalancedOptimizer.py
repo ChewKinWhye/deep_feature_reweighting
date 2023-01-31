@@ -13,7 +13,7 @@ class BalancedOptimizer(Optimizer):
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
     """
 
-    def __init__(self, params, lr=1e-3, momentum=0,
+    def __init__(self, params, group_size, lr=1e-3, momentum=0,
                  weight_decay=0):
 
         defaults = dict(lr=lr, momentum=momentum,
@@ -22,6 +22,7 @@ class BalancedOptimizer(Optimizer):
         self.lr = lr
         self.momentum = momentum
         self.weight_decay = weight_decay
+        self.num_groups = group_size
         self.reset()
 
     @torch.no_grad()
