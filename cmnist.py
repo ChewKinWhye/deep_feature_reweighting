@@ -21,6 +21,7 @@ from matplotlib.ticker import NullFormatter
 
 def color_train_digits(X, Y, spurious_strength):
     res = []
+    p = []
     for x, y in zip(X, Y):
         x = x / 255
         mask = x.view(28,28) > 0.1
@@ -29,6 +30,7 @@ def color_train_digits(X, Y, spurious_strength):
             color_idx = y
         else:
             color_idx = rnd.randint(0, 9)
+        p.append(color_idx)
         if color_idx == 0:
             img[0][mask] *= 0.5
         elif color_idx == 1:
@@ -57,7 +59,6 @@ def color_train_digits(X, Y, spurious_strength):
             pass
         res.append(img.clip(0,1))
     res = torch.stack(res)
-    p = Y
     return res, p
 
 

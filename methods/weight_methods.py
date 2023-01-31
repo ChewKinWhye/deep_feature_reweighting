@@ -239,7 +239,6 @@ class NashMTL(WeightMethod):
         else:
             self.step += 1
             alpha = self.prvs_alpha
-
         weighted_loss = sum([losses[i] * alpha[i] for i in range(len(alpha))])
         extra_outputs["weights"] = alpha
         return weighted_loss, extra_outputs

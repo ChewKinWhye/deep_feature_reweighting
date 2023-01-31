@@ -13,7 +13,7 @@ class BalancedOptimizer(Optimizer):
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
     """
 
-    def __init__(self, params, group_size, lr=1e-3, momentum=0,
+    def __init__(self, params, mode, group_size, lr=1e-3, momentum=0,
                  weight_decay=0):
 
         defaults = dict(lr=lr, momentum=momentum,
@@ -22,7 +22,8 @@ class BalancedOptimizer(Optimizer):
         self.lr = lr
         self.momentum = momentum
         self.weight_decay = weight_decay
-        self.num_groups = group_size
+        self.group_size = group_size
+        self.mode = mode
         self.reset()
 
     @torch.no_grad()
@@ -79,13 +80,19 @@ class BalancedOptimizer(Optimizer):
                 # Bias and linear layers will only have one adaptive learning rate
                 original_size = main_d_p.size()
                 if len(main_d_p.size()) > 2:
-                    main_d_p = main_d_p.view(4, -1)
-                    balanced_d_p = balanced_d_p.view(4, -1)
-                    adaptive_learning_rate = (torch.nn.CosineSimilarity(dim=1)(torch.flatten(main_d_p, start_dim=1), torch.flatten(balanced_d_p, start_dim=1)) + 1) / 2
+                    num_groups = int(main_d_p.size()[0] / self.group_size)
+                    main_d_p = main_d_p.view(num_groups, -1)
+                    balanced_d_p = balanced_d_p.view(num_groups, -1)
+                    adaptive_learning_rate = torch.nn.CosineSimilarity(dim=1)(torch.flatten(main_d_p, start_dim=1), torch.flatten(balanced_d_p, start_dim=1))
                     adaptive_learning_rate = adaptive_learning_rate.view(-1, 1)
                 else:
-                    adaptive_learning_rate = (torch.nn.CosineSimilarity(dim=0)(torch.flatten(main_d_p), torch.flatten(balanced_d_p)) + 1) / 2
-
+                    adaptive_learning_rate = torch.nn.CosineSimilarity(dim=0)(torch.flatten(main_d_p), torch.flatten(balanced_d_p))
+                if self.mode == 0:
+                    adaptive_learning_rate = (adaptive_learning_rate + 1) / 2
+                elif self.mode == 1:
+                    adaptive_learning_rate = torch.maximum(adaptive_learning_rate, torch.zeros_like(adaptive_learning_rate))
+                elif self.mode == 2:
+                    adaptive_learning_rate = adaptive_learning_rate
                 d_p = main_d_p * adaptive_learning_rate + balanced_d_p
                 d_p = d_p.view(original_size)
                 if self.weight_decay != 0:

@@ -105,27 +105,17 @@ def get_results(acc_groups, get_yp_func):
     return results
 
 
-def evaluate(model, loader, get_yp_func, multitask=False, predict_place=False, silent=False):
+def evaluate(model, loader, get_yp_func, silent=True):
     model.eval()
     acc_groups = {g_idx : AverageMeter() for g_idx in range(loader.dataset.n_groups)}
-    if multitask:
-        acc_place_groups = {g_idx: AverageMeter() for g_idx in range(trainset.n_groups)}
 
     with torch.no_grad():
         for x, y, g, p, idxs in tqdm.tqdm(loader, disable=silent):
             x, y, p = x.cuda(), y.cuda(), p.cuda()
-            if predict_place:
-                y = p
-
             logits = model(x)
-            if multitask:
-                logits, logits_place = logits
-                update_dict(acc_place_groups, p, g, logits_place)
 
             update_dict(acc_groups, y, g, logits)
     model.train()
-    if multitask:
-        return get_results(acc_groups, get_yp_func), get_results(acc_place_groups, get_yp_func)
     return get_results(acc_groups, get_yp_func)
 
 

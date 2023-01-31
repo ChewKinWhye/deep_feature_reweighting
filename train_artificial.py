@@ -1,6 +1,6 @@
 import torch
 import torchvision
-
+import time
 import numpy as np
 import os
 import tqdm
@@ -58,8 +58,8 @@ def parse_args():
     # Method 1: Only balanced dataset
     # Method 2: MTL
     # Method 3: Balanced Optimizer
-    # Scale of the methods
-
+    parser.add_argument("--group_size", type=int, default=4, help="Number kernels per group")
+    parser.add_argument("--regularize_mode", type=int, help="For 0, cosine similarity of -1 will be 0. For 1, cosine similarity of 0.5 will be 0. For 2, cosine similarity of -1 will be -1")
     args = parser.parse_args()
     # --- Parser End ---
     return args
@@ -120,7 +120,7 @@ def main(args):
     model.cuda()
 
     if args.method == 3:
-        optimizer = BalancedOptimizer(model.parameters(), lr=args.init_lr, momentum=args.momentum_decay,
+        optimizer = BalancedOptimizer(model.parameters(), mode=args.regularize_mode, group_size=args.group_size, lr=args.init_lr, momentum=args.momentum_decay,
                                       weight_decay=args.weight_decay)
     else:
         optimizer = torch.optim.SGD(
@@ -146,8 +146,8 @@ def main(args):
         # Track metrics
         loss_meter = AverageMeter()
         method_loss_meter = AverageMeter()
-
-        for batch in tqdm.tqdm(train_loader):
+        start = time.time()
+        for batch in tqdm.tqdm(train_loader, disable=True):
             # Data
             x, y, g, p, idxs = batch
             x, y, p = x.cuda(), y.cuda(), p.cuda()
@@ -195,12 +195,12 @@ def main(args):
             scheduler.step()
 
         # Save results
-        logger.write(f"Epoch {epoch}\t ERM Loss: {loss_meter.avg}\t Method Loss: {method_loss_meter.avg}\n")
+        logger.write(f"Epoch {epoch}\t ERM Loss: {loss_meter.avg:.3f}\t Method Loss: {method_loss_meter.avg:.3f}\t Time Taken: {time.time()-start:.3f}\n")
 
         # Evaluation
         # Iterating over datasets we test on
         for test_name, test_loader in test_loader_dict.items():
-            results = evaluate(model, test_loader, get_yp_func, args.multitask)
+            results = evaluate(model, test_loader, get_yp_func)
             minority_acc = []
             majority_acc = []
             for y in range(num_classes):
@@ -211,8 +211,8 @@ def main(args):
                         minority_acc.append(results[f"accuracy_{y}_{p}"])
             minority_acc = sum(minority_acc) / len(minority_acc)
             majority_acc = sum(majority_acc) / len(majority_acc)
-            logger.write(f"Minority {test_name} accuracy: {minority_acc}")
-            logger.write(f"Majority {test_name} accuracy: {majority_acc}")
+            logger.write(f"Minority {test_name} accuracy: {minority_acc:.3f}\t")
+            logger.write(f"Majority {test_name} accuracy: {majority_acc:.3f}\n")
 
         # Save best model based on worst group accuracy
         if minority_acc > best_worst_acc:
