@@ -68,6 +68,7 @@ def parse_args():
     # Method 6: Conditional Independence via Correlation Matrix
     # Method 7: MTL
     # Method 8: Learning Rate Regularization
+    # Method 9: Only balanced dataset
     # Scale of the methods
     parser.add_argument("--contrast_temperature", type=float, default=0.5, help="contrast the other half of the feature space inversely")
     parser.add_argument("--method_scale", type=float, default=0.1, help="Scale of feature regularization")
@@ -102,9 +103,9 @@ def main(args):
     if args.dataset == "waterbirds":
         VAL_SIZE = 1199
     else:
-        VAL_SIZE = 6000
+        VAL_SIZE = 100
 
-    if args.method in [1, 2, 3, 4, 5, 7, 8]:
+    if args.method in [1, 2, 3, 4, 5, 7, 8, 9]:
         indicies = np.arange(VAL_SIZE)
         np.random.shuffle(indicies)
         # First half for val
@@ -144,9 +145,10 @@ def main(args):
         }
 
     elif args.dataset == "cmnist":
+        majority_groups = [0, 11, 22, 33, 44, 55, 66, 77, 88, 99]
         target_resolution = (32, 32)
         trainset, valset_target, testset_dict = get_cmnist(target_resolution, VAL_SIZE, indicies_val, indicies_target)
-    
+    num_classes, num_places = testset_dict["Test"].n_classes, testset_dict["Test"].n_places 
     # Print dataset statistics
     # print(f"Length of training dataset: {trainset.__len__()}")
     # if valset_target is None:
@@ -233,7 +235,7 @@ def main(args):
             # --- Methods Start ---
             # Additional loss to regularize feature space based on method chosen
             # Contrast
-            if args.method in [1, 2, 3, 4, 5, 6]:
+            if args.method in [0, 1, 2, 3, 4, 5, 6, 9]:
                 logits = model(x)
                 loss = criterion(logits, y)
                 if args.method in [1, 2, 3]:
@@ -250,6 +252,14 @@ def main(args):
                     method_loss = correlation_loss(model, x[torch.where(y==0)]) * args.method_scale
                     # For y==1
                     method_loss += correlation_loss(model, x[torch.where(y==1)]) * args.method_scale
+                elif args.method == 9:
+                    random_indices = np.random.choice(len(valset_target), args.batch_size, replace=False)
+                    x_b, y_b, _, p_b, _ = valset_target.__getbatch__(random_indices)
+                    x_b, y_b, p_b = x_b.cuda(), y_b.type(torch.LongTensor).cuda(), p_b.cuda()
+                    logits_b = model(x_b)
+                    method_loss = criterion(logits_b, y_b)
+                    # Only train using balanced dataset
+                    loss = 0
                 total_loss = loss + method_loss
                 total_loss.backward()
 
@@ -330,7 +340,18 @@ def main(args):
                 logger.write(str(results))
                 logger.write('\n')
             # Save best model based on worst group accuracy
-            worst_val_acc = min(results["accuracy_0_0"], results["accuracy_0_1"], results["accuracy_1_0"], results["accuracy_1_1"])
+            minority_acc = []
+            majority_acc = []
+            for y in range(num_classes):
+                for p in range(num_places):
+                    if y == p:
+                        majority_acc.append(results[f"accuracy_{y}_{p}"])
+                    else:
+                        minority_acc.append(results[f"accuracy_{y}_{p}"])
+            worst_val_acc = sum(minority_acc) / len(minority_acc)
+            majority_val_acc = sum(majority_acc) / len(majority_acc)
+            logger.write(f"Minority validation accuracy: {worst_val_acc}")
+            logger.write(f"Majority validation accuracy: {majority_val_acc}")
             if worst_val_acc > best_worst_acc:
                 torch.save(
                     model.state_dict(), os.path.join(args.output_dir, 'best_checkpoint.pt'))

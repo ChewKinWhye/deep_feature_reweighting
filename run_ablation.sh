@@ -2,13 +2,13 @@
 
 for method in 0 7
 do
-	for weight_decay in 1e-1 1e-2 1e-3 1e-4
+	for weight_decay in 1e-4
 	do
-		for batch_size in 32 64 128
+		for batch_size in 16
 		do
-			for init_lr in 1e-3 1e-4
+			for init_lr in 1e-4
 			do
-				for seed in 0 1 2 3 4
+				for seed in 0
 				do
 					exp_name=$seed-$weight_decay-$batch_size-$init_lr
 					echo $exp_name

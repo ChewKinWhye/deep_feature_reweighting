@@ -85,7 +85,7 @@ class BalancedOptimizer(Optimizer):
                 else:
                     adaptive_learning_rate = (torch.nn.CosineSimilarity(dim=0)(torch.flatten(main_d_p), torch.flatten(balanced_d_p)) + 1) / 2
 
-                d_p = main_d_p * adaptive_learning_rate
+                d_p = main_d_p * adaptive_learning_rate + balanced_d_p
                 d_p = d_p.view(original_size)
                 if self.weight_decay != 0:
                     d_p = d_p.add(param, alpha=self.weight_decay)

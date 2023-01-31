@@ -66,28 +66,28 @@ def color_test_digits(X, Y):
         img = x.repeat(3, 1, 1)
         color_idx = rnd.randint(0, 9)
         p.append(color_idx)
-        if color_idx == 9:
+        if color_idx == 0:
             img[0][mask] *= 0.5
-        elif color_idx == 8:
+        elif color_idx == 1:
             img[1][mask] *= 0.5
-        elif color_idx == 7:
+        elif color_idx == 2:
             img[2][mask] *= 0.5
-        elif color_idx == 6:
+        elif color_idx == 3:
             img[0][mask] *= 0.2
             img[1][mask] *= 0.2
-        elif color_idx == 5:
+        elif color_idx == 4:
             img[0][mask] *= 0.1
             img[2][mask] *= 0.1
-        elif color_idx == 4:
+        elif color_idx == 5:
             img[1][mask] *= 0.6
             img[2][mask] *= 0.
-        elif color_idx == 3:
+        elif color_idx == 6:
             img[1][mask] *= 0.3
             img[2][mask] *= 0.2
-        elif color_idx == 2:
+        elif color_idx == 7:
             img[0][mask] *= 0.
             img[2][mask] *= 0.6
-        elif color_idx == 1:
+        elif color_idx == 8:
             img[0][mask] *= 0.5
             img[1][mask] *= 0.2
         else:

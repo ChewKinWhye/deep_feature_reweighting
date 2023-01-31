@@ -1,5 +1,5 @@
-for i in {12..56..1}
+for i in {593..616..1}
 do
-	filename="52742""$i"".venus01"
+	filename="5281""$i"".venus01"
 	qdel $filename
 done
