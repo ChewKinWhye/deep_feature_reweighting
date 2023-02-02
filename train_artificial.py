@@ -21,6 +21,7 @@ import torch.nn.init as init
 import torch.nn.functional as F
 from methods.weight_methods import WeightMethods
 from cmnist import get_cmnist
+from mcdominoes import get_mcdominoes
 from torch.utils.data import Dataset, DataLoader
 
 
@@ -96,6 +97,10 @@ def main(args):
     if args.dataset == "cmnist":
         target_resolution = (32, 32)
         trainset, valset_target, testset_dict = get_cmnist(target_resolution, args.val_size, args.spurious_strength, indicies_val, indicies_target)
+    elif args.dataset == "mcdominoes":
+        target_resolution = (32, 32)
+        trainset, valset_target, testset_dict = get_mcdominoes(target_resolution, args.val_size, args.spurious_strength, indicies_val, indicies_target)
+
     num_classes, num_places = testset_dict["Test"].n_classes, testset_dict["Test"].n_places
 
     loader_kwargs = {'batch_size': args.batch_size, 'num_workers': 4, 'pin_memory': True}
