@@ -12,8 +12,6 @@ import pandas as  pd
 import torchvision.utils as vision_utils
 from PIL import Image
 import torchvision
-from colorama import Fore, Back, Style
-from matplotlib.ticker import NullFormatter
 from torchvision import transforms
 
 
@@ -36,7 +34,7 @@ class MCDOMINOES(Dataset):
                 torch.arange(self.n_places).unsqueeze(1) == torch.from_numpy(self.p_array)).sum(1).float()
 
         self.transform = transforms.Compose([
-            transforms.Resize((int(target_resolution[0] * scale), int(target_resolution[1] * scale))),
+            transforms.Resize(target_resolution),
             transforms.CenterCrop(target_resolution),
             transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
             ])
@@ -96,7 +94,7 @@ def get_mcdominoes(target_resolution, VAL_SIZE, spurious_strength, indicies_val,
     # Load mnist train
     transform = torchvision.transforms.Compose([torchvision.transforms.ToTensor()])
     mnist_train_set = torchvision.datasets.MNIST('./data/mnist/', train=True, download=True)
-    mnist_train_input = mnist_train_set.data.view(-1, 1, 28, 28).float()
+    mnist_train_input = mnist_train_set.data.view(-1, 1, 28, 28).float()/255.0
     mnist_train_target = mnist_train_set.targets
     rand_perm = torch.randperm(len(mnist_train_input))
     mnist_train_input = mnist_train_input[rand_perm]
@@ -104,7 +102,7 @@ def get_mcdominoes(target_resolution, VAL_SIZE, spurious_strength, indicies_val,
 
     # Load mnist test
     mnist_test_set = torchvision.datasets.MNIST('./data/mnist/', train=False, download=True)
-    mnist_test_input = mnist_test_set.data.view(-1, 1, 28, 28).float()
+    mnist_test_input = mnist_test_set.data.view(-1, 1, 28, 28).float()/255.0
     mnist_test_target = mnist_test_set.targets
 
     # Load cifar train
@@ -189,7 +187,7 @@ def get_mcdominoes(target_resolution, VAL_SIZE, spurious_strength, indicies_val,
     rand_perm = torch.randperm(len(X_train))
     X_train = X_train[rand_perm]
     P_train = P_train[rand_perm]
-    Y_train = Y_train[rand_perm].float().view(-1, 1)
+    Y_train = Y_train[rand_perm]
 
     # For validation and test, shuffle then concatenate
     rand_perm = torch.randperm(len(mnist_val_input))
@@ -200,7 +198,7 @@ def get_mcdominoes(target_resolution, VAL_SIZE, spurious_strength, indicies_val,
     cifar_val_target = cifar_val_target[rand_perm]
     X_val = torch.cat((mnist_val_input, cifar_val_input), dim=2)
     P_val = mnist_val_target
-    Y_val = cifar_val_target.float().view(-1, 1)
+    Y_val = cifar_val_target
     if indicies_target is not None:
         X_target, P_target, Y_target = X_val[indicies_target], P_val[indicies_target], Y_val[indicies_target]
     X_val, P_val, Y_val = X_val[indicies_val], P_val[indicies_val], Y_val[indicies_val]
@@ -214,7 +212,7 @@ def get_mcdominoes(target_resolution, VAL_SIZE, spurious_strength, indicies_val,
 
     X_test = torch.cat((mnist_test_input, cifar_test_input), dim=2)
     P_test = mnist_test_target
-    Y_test = cifar_test_target.float().view(-1, 1)
+    Y_test = cifar_test_target
 
     train_dataset = MCDOMINOES(X_train, Y_train, P_train, target_resolution)
     val_dataset = MCDOMINOES(X_val, Y_val, P_val, target_resolution)
