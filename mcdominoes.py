@@ -34,8 +34,8 @@ class MCDOMINOES(Dataset):
                 torch.arange(self.n_places).unsqueeze(1) == torch.from_numpy(self.p_array)).sum(1).float()
 
         self.transform = transforms.Compose([
-            transforms.Resize(target_resolution),
-            transforms.CenterCrop(target_resolution),
+            #transforms.Resize(target_resolution),
+            #transforms.CenterCrop(target_resolution),
             transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
             ])
 

@@ -68,7 +68,7 @@ def set_seed(seed):
     np.random.seed(seed)
     torch.backends.cudnn.benchmark = False
     torch.backends.cudnn.deterministic = True
-
+    
 
 def get_y_p(g, n_places):
     y = g // n_places
