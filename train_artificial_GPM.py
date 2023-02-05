@@ -9,21 +9,11 @@ import sys
 import json
 from functools import partial
 from wb_data import WaterBirdsDataset, get_loader, wb_transform, log_data
-from argparse import Namespace
-from BalancedOptimizer import BalancedOptimizer
-from utils import MultiTaskHead, Discriminator
 from utils import Logger, AverageMeter, set_seed, evaluate, get_y_p
-from utils import update_dict, get_results, write_dict_to_tb
-from utils import feature_reg_loss_specific, contrastive_loss, retain_feature_loss, coral_loss, correlation_loss, \
-    MTL_Loss
-import torch.nn as nn
-import torch.nn.init as init
-import torch.nn.functional as F
-from methods.weight_methods import WeightMethods
 from cmnist import get_cmnist
 from mcdominoes import get_mcdominoes
 from torch.utils.data import Dataset, DataLoader
-
+from GPM import ResNet18, get_model, set_model_, update_GPM, get_representation_matrix_ResNet18
 
 def parse_args():
     # --- Parser Start ---
@@ -53,14 +43,7 @@ def parse_args():
     parser.add_argument("--init_lr", type=float, default=1e-3)
     parser.add_argument("--seed", type=int, default=0)
 
-    # Different methods and combination of methods
-    parser.add_argument("--method", type=int, default=0, help="Which method to use")
-    # Method 0: Normal ERM
-    # Method 1: Only balanced dataset
-    # Method 2: MTL
-    # Method 3: Balanced Optimizer
-    parser.add_argument("--group_size", type=int, default=4, help="Number kernels per group")
-    parser.add_argument("--regularize_mode", type=int, help="For 0, cosine similarity of -1 will be 0. For 1, cosine similarity of 0.5 will be 0. For 2, cosine similarity of -1 will be -1")
+
     args = parser.parse_args()
     # --- Parser End ---
     return args
@@ -82,16 +65,12 @@ def main(args):
     # --- Logger End ---
 
     # --- Data Start ---
-    if args.method == 0:
-        indicies_val = np.arange(args.val_size)
-        indicies_target = None
-    else:
-        indicies = np.arange(args.val_size)
-        np.random.shuffle(indicies)
-        # First half for val
-        indicies_val = indicies[:len(indicies) // 2]
-        # Second half for target
-        indicies_target = indicies[len(indicies) // 2:]
+    indicies = np.arange(args.val_size)
+    np.random.shuffle(indicies)
+    # First half for val
+    indicies_val = indicies[:len(indicies) // 2]
+    # Second half for target
+    indicies_target = indicies[len(indicies) // 2:]
 
     # Obtain trainset, valset_target, and testset_dict
     if args.dataset == "cmnist":
@@ -105,10 +84,9 @@ def main(args):
 
     loader_kwargs = {'batch_size': args.batch_size, 'num_workers': 4, 'pin_memory': True}
     # For method 1, the training dataset is the balanced dataset
-    if args.method == 1:
-        train_loader = DataLoader(valset_target, shuffle=True, **loader_kwargs)
-    else:
-        train_loader = DataLoader(trainset, shuffle=True, **loader_kwargs)
+
+    target_loader = DataLoader(valset_target, shuffle=True, **loader_kwargs)
+    train_loader = DataLoader(trainset, shuffle=True, **loader_kwargs)
 
     test_loader_dict = {}
     for test_name, testset_v in testset_dict.items():
@@ -118,17 +96,13 @@ def main(args):
     log_data(logger, trainset, testset_dict['Test'], testset_dict['Validation'], get_yp_func=get_yp_func)
     # --- Data End ---
 
-    # --- Model Start ---
-    model = torchvision.models.resnet18(pretrained=args.pretrained_model)
-    d = model.fc.in_features
-    model.fc = torch.nn.Linear(d, num_classes)
+    model = ResNet18([(0, 10), (1, 10)], 20)  # base filters: 20
+    threshold = np.array([0.99] * 20)
+
+    best_model = get_model(model)
     model.cuda()
 
-    if args.method == 3:
-        optimizer = BalancedOptimizer(model.parameters(), mode=args.regularize_mode, group_size=args.group_size, lr=args.init_lr, momentum=args.momentum_decay,
-                                      weight_decay=args.weight_decay)
-    else:
-        optimizer = torch.optim.SGD(
+    optimizer = torch.optim.SGD(
             model.parameters(), lr=args.init_lr, momentum=args.momentum_decay, weight_decay=args.weight_decay)
     if args.scheduler:
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
@@ -139,10 +113,6 @@ def main(args):
     criterion = torch.nn.CrossEntropyLoss()
     # --- Model End ---
 
-    # For method 7: NashMTL
-    weight_methods_parameters = {'update_weights_every': 1, 'optim_niter': 20}
-    weight_method = WeightMethods("nashmtl", n_tasks=2, device=torch.device('cuda'), **weight_methods_parameters)
-
     # --- Train Start ---
     best_worst_acc = 0
 
@@ -152,7 +122,7 @@ def main(args):
         loss_meter = AverageMeter()
         method_loss_meter = AverageMeter()
         start = time.time()
-        for batch in tqdm.tqdm(train_loader, disable=True):
+        for batch in tqdm.tqdm(target_loader, disable=True):
             # Data
             x, y, g, p, idxs = batch
             x, y, p = x.cuda(), y.cuda(), p.cuda()
@@ -160,37 +130,10 @@ def main(args):
 
             # --- Methods Start ---
             logits = model(x)
-            loss = criterion(logits, y)
+            loss = criterion(logits[0], y)
 
-            # Normal ERM
-            if args.method == 0 or args.method == 1:
-                method_loss = 0
-                loss.backward()
-            # Methods with method loss
-            else:
-                random_indices = np.random.choice(len(valset_target), args.batch_size, replace=False)
-                x_b, y_b, _, _, _ = valset_target.__getbatch__(random_indices)
-                x_b, y_b = x_b.cuda(), y_b.type(torch.LongTensor).cuda()
-
-                if args.method == 2:
-                    logits_b = model(x_b)
-                    method_loss = criterion(logits_b, y_b)
-                    losses = torch.stack((loss, method_loss,))
-                    # print(losses)
-                    weight_method.backward(losses=losses, shared_parameters=list(model.parameters()),
-                                           task_specific_parameters=None, last_shared_parameters=None,
-                                           representation=None,)
-                # Balanced Optimizer
-                elif args.method == 3:
-                    loss.backward()
-                    optimizer.store_gradients("main")
-                    optimizer.zero_grad()
-
-                    logits_b = model(x_b)
-                    method_loss = criterion(logits_b, y_b)
-                    method_loss.backward()
-                    optimizer.store_gradients("balanced")
-
+            method_loss = 0
+            loss.backward()
             optimizer.step()
             method_loss_meter.update(method_loss, x.size(0))
             loss_meter.update(loss, x.size(0))
@@ -205,7 +148,7 @@ def main(args):
         # Evaluation
         # Iterating over datasets we test on
         for test_name, test_loader in test_loader_dict.items():
-            results = evaluate(model, test_loader, get_yp_func)
+            results = evaluate(model, test_loader, get_yp_func, GPM=True)
             minority_acc = []
             majority_acc = []
             for y in range(num_classes):
@@ -224,6 +167,7 @@ def main(args):
             torch.save(
                 model.state_dict(), os.path.join(args.output_dir, 'best_checkpoint.pt'))
             best_worst_acc = minority_acc
+            best_model = get_model(model)
 
         logger.write('\n')
 
@@ -232,7 +176,86 @@ def main(args):
 
     logger.write(f'Best validation worst-group accuracy: {best_worst_acc}')
     logger.write('\n')
+    set_model_(model, best_model)
+    mat_list = get_representation_matrix_ResNet18(model, valset_target)
+    feature_list = update_GPM(model, mat_list, threshold, feature_list=[])
 
+    feature_mat = []
+    # Projection Matrix Precomputation
+    for i in range(len(feature_list)):
+        Uf = torch.Tensor(np.dot(feature_list[i], feature_list[i].transpose())).cuda()
+        print('Layer {} - Projection Matrix shape: {}'.format(i + 1, Uf.shape))
+        feature_mat.append(Uf)
+
+    for epoch in range(args.num_epochs):
+        model.train()
+        # Track metrics
+        loss_meter = AverageMeter()
+        method_loss_meter = AverageMeter()
+        start = time.time()
+        for batch in tqdm.tqdm(train_loader, disable=True):
+            # Data
+            x, y, g, p, idxs = batch
+            x, y, p = x.cuda(), y.cuda(), p.cuda()
+            optimizer.zero_grad()
+
+            # --- Methods Start ---
+            logits = model(x)
+            loss = criterion(logits[1], y)
+
+            method_loss = 0
+            loss.backward()
+            kk = 0
+            for k, (m, params) in enumerate(model.named_parameters()):
+                if len(params.size()) == 4:
+                    sz = params.grad.data.size(0)
+                    params.grad.data = params.grad.data - torch.mm(params.grad.data.view(sz, -1), feature_mat[kk]).view(params.size())
+                    kk += 1
+                elif len(params.size()) == 1:
+                    params.grad.data.fill_(0)
+
+            optimizer.step()
+            method_loss_meter.update(method_loss, x.size(0))
+            loss_meter.update(loss, x.size(0))
+            # --- Methods Ends ---
+
+        if args.scheduler:
+            scheduler.step()
+
+        # Save results
+        logger.write(f"Epoch {epoch}\t ERM Loss: {loss_meter.avg:.3f}\t Method Loss: {method_loss_meter.avg:.3f}\t Time Taken: {time.time()-start:.3f}\n")
+
+        # Evaluation
+        # Iterating over datasets we test on
+        for test_name, test_loader in test_loader_dict.items():
+            results = evaluate(model, test_loader, get_yp_func, GPM=1)
+            minority_acc = []
+            majority_acc = []
+            for y in range(num_classes):
+                for p in range(num_places):
+                    if y == p:
+                        majority_acc.append(results[f"accuracy_{y}_{p}"])
+                    else:
+                        minority_acc.append(results[f"accuracy_{y}_{p}"])
+            minority_acc = sum(minority_acc) / len(minority_acc)
+            majority_acc = sum(majority_acc) / len(majority_acc)
+            logger.write(f"Minority {test_name} accuracy: {minority_acc:.3f}\t")
+            logger.write(f"Majority {test_name} accuracy: {majority_acc:.3f}\n")
+
+        # Save best model based on worst group accuracy
+        if minority_acc > best_worst_acc:
+            torch.save(
+                model.state_dict(), os.path.join(args.output_dir, 'best_checkpoint.pt'))
+            best_worst_acc = minority_acc
+            best_model = get_model(model)
+
+        logger.write('\n')
+
+    torch.save(model.state_dict(), os.path.join(args.output_dir, 'final_checkpoint.pt'))
+    # --- Train End ---
+
+    logger.write(f'Best validation worst-group accuracy: {best_worst_acc}')
+    logger.write('\n')
 
 if __name__ == "__main__":
     args = parse_args()

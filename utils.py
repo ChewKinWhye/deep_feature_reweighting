@@ -7,6 +7,7 @@ import tqdm
 
 import torch
 import torch.nn as nn
+import random as rnd
 
 
 class Logger(object):
@@ -68,7 +69,8 @@ def set_seed(seed):
     np.random.seed(seed)
     torch.backends.cudnn.benchmark = False
     torch.backends.cudnn.deterministic = True
-    
+    rnd.seed(10)
+
 
 def get_y_p(g, n_places):
     y = g // n_places
@@ -105,15 +107,17 @@ def get_results(acc_groups, get_yp_func):
     return results
 
 
-def evaluate(model, loader, get_yp_func, silent=True):
+def evaluate(model, loader, get_yp_func, silent=True, GPM=False):
     model.eval()
     acc_groups = {g_idx : AverageMeter() for g_idx in range(loader.dataset.n_groups)}
 
     with torch.no_grad():
         for x, y, g, p, idxs in tqdm.tqdm(loader, disable=silent):
             x, y, p = x.cuda(), y.cuda(), p.cuda()
-            logits = model(x)
-
+            if GPM:
+                logits = model(x)[0]
+            else:
+                logits = model(x)
             update_dict(acc_groups, y, g, logits)
     model.train()
     return get_results(acc_groups, get_yp_func)
