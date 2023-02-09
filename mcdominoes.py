@@ -198,7 +198,6 @@ def get_mcdominoes(target_resolution, VAL_SIZE, spurious_strength, indicies_val,
     X_val = torch.cat((mnist_val_input, cifar_val_input), dim=2)
     P_val = mnist_val_target
     Y_val = cifar_val_target
-    print(Y_val)
     if indicies_target is not None:
         X_target, P_target, Y_target = X_val[indicies_target], P_val[indicies_target], Y_val[indicies_target]
     X_val, P_val, Y_val = X_val[indicies_val], P_val[indicies_val], Y_val[indicies_val]

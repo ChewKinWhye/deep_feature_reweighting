@@ -15,39 +15,25 @@ C_OPTIONS = [0.01, 0.05, 0.1, 0.5, 1, 1.5, 2, 2.5, 3]
 REG = "l1"
 
 def dfr_on_validation_tune(
-        all_embeddings, all_y, all_g, preprocess=True,
-        balance_val=False, num_retrains=30):
+        all_embeddings, all_y, all_p, preprocess=True, num_retrains=30):
 
     worst_accs = {}
     for i in range(num_retrains):
         # Only use validation data for the last layer retraining
         x_val = all_embeddings["val"]
         y_val = all_y["val"]
-        g_val = all_g["val"]
-        n_groups = np.max(g_val) + 1
+        p_val = all_p["val"]
         n_val = len(x_val) // 2
         idx = np.arange(len(x_val))
         np.random.shuffle(idx)
 
         # Split validation data into half
-        x_valtrain = x_val[idx[n_val:]]
-        y_valtrain = y_val[idx[n_val:]]
-        g_valtrain = g_val[idx[n_val:]]
-
-        n_groups = np.max(g_valtrain) + 1
-        g_idx = [np.where(g_valtrain == g)[0] for g in range(n_groups)]
-        min_g = np.min([len(g) for g in g_idx])
-        for g in g_idx:
-            np.random.shuffle(g)
-        if balance_val:
-            x_train = np.concatenate([x_valtrain[g[:min_g]] for g in g_idx])
-            y_train = np.concatenate([y_valtrain[g[:min_g]] for g in g_idx])
-            g_train = np.concatenate([g_valtrain[g[:min_g]] for g in g_idx])
+        x_train = x_val[idx[n_val:]]
+        y_train = y_val[idx[n_val:]]
 
         x_val = x_val[idx[:n_val]]
         y_val = y_val[idx[:n_val]]
-        g_val = g_val[idx[:n_val]]
-
+        p_val = p_val[idx[:n_val]]
         if preprocess:
             scaler = StandardScaler()
             x_train = scaler.fit_transform(x_train)
@@ -59,40 +45,35 @@ def dfr_on_validation_tune(
                                         class_weight=class_weight)
             logreg.fit(x_train, y_train)
             preds_val = logreg.predict(x_val)
-            group_accs = np.array(
-                [(preds_val == y_val)[g_val == g].mean()
-                    for g in range(n_groups)])
-            worst_acc = np.min(group_accs)
+            minority_acc, minority_sum, majority_acc, majority_sum = 0, 0, 0, 0
+            correct = y_val == preds_val
+            for x in range(len(y_val)):
+                if y_val[x] == p_val[x]:
+                    majority_acc += correct[x]
+                    majority_sum += 1
+                else:
+                    minority_acc += correct[x]
+                    minority_sum += 1
             if i == 0:
-                worst_accs[c] = worst_acc
+                worst_accs[c] = minority_acc / minority_acc
             else:
-                worst_accs[c] += worst_acc
+                worst_accs[c] += minority_acc / minority_acc
     ks, vs = list(worst_accs.keys()), list(worst_accs.values())
     best_hypers = ks[np.argmax(vs)]
     return best_hypers
 
 
 def dfr_on_validation_eval(
-        c, all_embeddings, all_y, all_g, num_retrains=30, w1=1, w2=1,
-        preprocess=True, balance_val=False):
+        c, all_embeddings, all_y, all_p, num_retrains=30, w1=1, w2=1,
+        preprocess=True):
     coefs, intercepts = [], []
     if preprocess:
         scaler = StandardScaler()
         scaler.fit(all_embeddings["train"])
 
     for i in range(num_retrains):
-        x_val = all_embeddings["val"]
-        y_val = all_y["val"]
-        g_val = all_g["val"]
-        n_groups = np.max(g_val) + 1
-        g_idx = [np.where(g_val == g)[0] for g in range(n_groups)]
-        min_g = np.min([len(g) for g in g_idx])
-        for g in g_idx:
-            np.random.shuffle(g)
-        if balance_val:
-            x_train = np.concatenate([x_val[g[:min_g]] for g in g_idx])
-            y_train = np.concatenate([y_val[g[:min_g]] for g in g_idx])
-            g_train = np.concatenate([g_val[g[:min_g]] for g in g_idx])
+        x_train = all_embeddings["val"]
+        y_train = all_y["val"]
 
         if preprocess:
             x_train = scaler.transform(x_train)
@@ -105,7 +86,7 @@ def dfr_on_validation_eval(
 
     x_test = all_embeddings["test"]
     y_test = all_y["test"]
-    g_test = all_g["test"]
+    p_test = all_p["test"]
     # print(np.bincount(g_test))
 
     if preprocess:
@@ -119,13 +100,16 @@ def dfr_on_validation_eval(
     logreg.intercept_ = np.mean(intercepts, axis=0)
     preds_test = logreg.predict(x_test)
     preds_train = logreg.predict(x_train)
-    n_groups = np.max(g_train) + 1
-    test_accs = [(preds_test == y_test)[g_test == g].mean()
-                 for g in range(n_groups)]
-    test_mean_acc = (preds_test == y_test).mean()
-    train_accs = [(preds_train == y_train)[g_train == g].mean()
-                  for g in range(n_groups)]
-    return test_accs, test_mean_acc, train_accs, logreg.coef_
+    minority_acc, minority_sum, majority_acc, majority_sum = 0, 0, 0, 0
+    for i in range(len(y_test)):
+        correct = y_test[i] == preds_test[i]
+        if y_test[i] == p_test[i]:
+            majority_acc += correct
+            majority_sum += 1
+        else:
+            minority_acc += correct
+            minority_sum += 1
+    print(minority_acc / minority_sum, majority_acc / majority_sum)
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Tune and evaluate DFR.")
@@ -198,7 +182,20 @@ def main(args):
     base_model_results["test"] = evaluate(model, test_loader, get_yp_func, silent=True)
     base_model_results["val"] = evaluate(model, val_loader, get_yp_func, silent=True)
     base_model_results["train"] = evaluate(model, train_loader, get_yp_func, silent=True)
-    print(base_model_results)
+    base_model_results_processed = {}
+    for split in base_model_results:
+        minority_acc = []
+        majority_acc = []
+        for y in range(num_classes):
+            for p in range(num_places):
+                if y == p:
+                    majority_acc.append(base_model_results[split][f"accuracy_{y}_{p}"])
+                else:
+                    minority_acc.append(base_model_results[split][f"accuracy_{y}_{p}"])
+        majority_acc = sum(majority_acc) / len(majority_acc)
+        minority_acc = sum(minority_acc) / len(minority_acc)
+        base_model_results_processed[split] = (minority_acc, majority_acc)
+    print(base_model_results_processed)
     # --- Base Model Evaluation End ---
 
     # --- Extract Embeddings Start ---
@@ -231,24 +228,13 @@ def main(args):
     # DFR on validation
     print("Validation Tune")
     dfr_val_results = {}
-    c = dfr_on_validation_tune(
-        all_embeddings, all_y, all_g,
-        balance_val=args.balance_dfr_val)
+    c = dfr_on_validation_tune(all_embeddings, all_y, all_p)
 
     dfr_val_results["best_hypers"] = c
     print("Best C value:", c)
 
     print("Validation Test")
-    test_accs, test_mean_acc, train_accs, coefs = dfr_on_validation_eval(
-        c, all_embeddings, all_y, all_g,
-        balance_val=args.balance_dfr_val)
-    dfr_val_results["test_accs"] = test_accs
-    dfr_val_results["train_accs"] = train_accs
-    dfr_val_results["test_worst_acc"] = np.min(test_accs)
-    dfr_val_results["test_mean_acc"] = test_mean_acc
-
-    print(dfr_val_results)
-
+    dfr_on_validation_eval(c, all_embeddings, all_y, all_p)
 
 if __name__ == "__main__":
     args = parse_args()

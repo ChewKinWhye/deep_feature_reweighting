@@ -8,10 +8,11 @@ dataset = "mcdominoes"
 spurious_strength = 0.95
 val_size = 1000
 
+base_path = f"/hpctmp/e0200920/method_{method}"
 file_initial = f"{method}-{dataset}-{spurious_strength}-{val_size}"
 
 # Filenames
-files = [i for i in os.listdir() if file_initial in i]
+files = [i for i in os.listdir(base_path) if file_initial in i]
 files_without_seed = list(set([i[:-2] for i in files]))
 
 # Results
@@ -23,7 +24,7 @@ for file_without_seed in files_without_seed:
     for seed in range(num_seed):
         file_with_seed = file_without_seed + f"-{seed}"
         # print(file_with_seed)
-        result_path = os.path.join(file_with_seed, "log.txt")
+        result_path = os.path.join(base_path, file_with_seed, "log.txt")
         with open(result_path) as f:
             lines = f.readlines()
         # print(lines)
