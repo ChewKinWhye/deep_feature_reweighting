@@ -2,11 +2,16 @@ import os
 import json
 
 # Parameters
-method = "CORR"
 num_seed = 3
+method = 0
+dataset = "mcdominoes"
+spurious_strength = 0.95
+val_size = 1000
+
+file_initial = f"{method}-{dataset}-{spurious_strength}-{val_size}"
 
 # Filenames
-files = [i for i in os.listdir() if method in i]
+files = [i for i in os.listdir() if file_initial in i]
 files_without_seed = list(set([i[:-2] for i in files]))
 
 # Results
