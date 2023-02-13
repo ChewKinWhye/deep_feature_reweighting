@@ -93,6 +93,8 @@ class BalancedOptimizer(Optimizer):
                     adaptive_learning_rate = torch.maximum(adaptive_learning_rate, torch.zeros_like(adaptive_learning_rate))
                 elif self.mode == 2:
                     adaptive_learning_rate = adaptive_learning_rate
+                elif self.mode == 3:
+                    adaptive_learning_rate = torch.maximum(torch.sign(adaptive_learning_rate), torch.zeros_like(adaptive_learning_rate))
                 d_p = main_d_p * adaptive_learning_rate + balanced_d_p
                 d_p = d_p.view(original_size)
                 if self.weight_decay != 0:

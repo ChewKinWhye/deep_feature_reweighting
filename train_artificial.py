@@ -41,13 +41,13 @@ def parse_args():
     parser.add_argument("--pretrained_model", action='store_true', help="Use pretrained model")
 
     # Data
-    parser.add_argument("--val_size", type=int, default=200, help="Size of validation dataset")
+    parser.add_argument("--val_size", type=int, default=1000, help="Size of validation dataset")
     parser.add_argument("--spurious_strength", type=float, default=1, help="Strength of spurious correlation")
 
     # Training
     parser.add_argument("--scheduler", action='store_true', help="Learning rate scheduler")
     parser.add_argument("--batch_size", type=int, default=32)
-    parser.add_argument("--num_epochs", type=int, default=50)
+    parser.add_argument("--num_epochs", type=int, default=200)
     parser.add_argument("--weight_decay", type=float, default=1e-4)
     parser.add_argument("--momentum_decay", type=float, default=0.9)
     parser.add_argument("--init_lr", type=float, default=1e-3)
@@ -60,7 +60,7 @@ def parse_args():
     # Method 2: MTL
     # Method 3: Balanced Optimizer
     parser.add_argument("--group_size", type=int, default=4, help="Number kernels per group")
-    parser.add_argument("--regularize_mode", type=int, help="For 0, cosine similarity of -1 will be 0. For 1, cosine similarity of 0.5 will be 0. For 2, cosine similarity of -1 will be -1")
+    parser.add_argument("--regularize_mode", type=int, help="For 0, cosine similarity of -1 will be 0. For 1, cosine similarity of 0.5 will be 0. For 2, cosine similarity of -1 will be -1. For 3, output will be the sign function")
     args = parser.parse_args()
     # --- Parser End ---
     return args

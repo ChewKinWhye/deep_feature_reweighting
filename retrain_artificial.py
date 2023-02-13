@@ -99,7 +99,6 @@ def dfr_on_validation_eval(
     logreg.coef_ = np.mean(coefs, axis=0)
     logreg.intercept_ = np.mean(intercepts, axis=0)
     preds_test = logreg.predict(x_test)
-    preds_train = logreg.predict(x_train)
     minority_acc, minority_sum, majority_acc, majority_sum = 0, 0, 0, 0
     for i in range(len(y_test)):
         correct = y_test[i] == preds_test[i]
@@ -115,7 +114,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Tune and evaluate DFR.")
     parser.add_argument("--dataset", type=str, default="cmnist",
                         help="Which dataset to use: [cmnist, mcdominoes]")
-    parser.add_argument("--val_size", type=int, default=200, help="Size of validation dataset")
+    parser.add_argument("--val_size", type=int, default=1000, help="Size of validation dataset")
     parser.add_argument("--spurious_strength", type=float, default=1, help="Strength of spurious correlation")
 
     parser.add_argument(
@@ -123,10 +122,6 @@ def parse_args():
     parser.add_argument(
         "--batch_size", type=int, default=100, required=False,
         help="Checkpoint path")
-    parser.add_argument(
-        "--balance_dfr_val", type=bool, default=True, required=False,
-        help="Subset validation to have equal groups for DFR(Val)")
-    parser.add_argument("--reduce_dimension", action='store_true', help="Whether the model has reduced dimension")
     parser.add_argument("--seed", type=int, default=0)
 
     args = parser.parse_args()
