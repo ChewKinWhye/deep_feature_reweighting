@@ -205,17 +205,7 @@ def main(args):
         # Evaluation
         # Iterating over datasets we test on
         for test_name, test_loader in test_loader_dict.items():
-            results = evaluate(model, test_loader, get_yp_func)
-            minority_acc = []
-            majority_acc = []
-            for y in range(num_classes):
-                for p in range(num_places):
-                    if y == p:
-                        majority_acc.append(results[f"accuracy_{y}_{p}"])
-                    else:
-                        minority_acc.append(results[f"accuracy_{y}_{p}"])
-            minority_acc = sum(minority_acc) / len(minority_acc)
-            majority_acc = sum(majority_acc) / len(majority_acc)
+            minority_acc, majority_acc = evaluate(model, test_loader, get_yp_func)
             logger.write(f"Minority {test_name} accuracy: {minority_acc:.3f}\t")
             logger.write(f"Majority {test_name} accuracy: {majority_acc:.3f}\n")
 

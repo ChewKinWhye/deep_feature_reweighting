@@ -143,7 +143,6 @@ def main(args):
         indicies_target = None
 
     # Obtain trainset, valset_target, and testset_dict
-    # The valset will be the same datapoints as the valset during the training phase, since the seed is the same
     if args.dataset == "cmnist":
         target_resolution = (32, 32)
         trainset, valset_target, testset_dict = get_cmnist(target_resolution, args.val_size, args.spurious_strength, indicies_val, indicies_target)
@@ -181,20 +180,7 @@ def main(args):
     base_model_results["test"] = evaluate(model, test_loader, get_yp_func, silent=True)
     base_model_results["val"] = evaluate(model, val_loader, get_yp_func, silent=True)
     base_model_results["train"] = evaluate(model, train_loader, get_yp_func, silent=True)
-    base_model_results_processed = {}
-    for split in base_model_results:
-        minority_acc = []
-        majority_acc = []
-        for y in range(num_classes):
-            for p in range(num_places):
-                if y == p:
-                    majority_acc.append(base_model_results[split][f"accuracy_{y}_{p}"])
-                else:
-                    minority_acc.append(base_model_results[split][f"accuracy_{y}_{p}"])
-        majority_acc = sum(majority_acc) / len(majority_acc)
-        minority_acc = sum(minority_acc) / len(minority_acc)
-        base_model_results_processed[split] = (minority_acc, majority_acc)
-    print(base_model_results_processed)
+    print(base_model_results)
     # --- Base Model Evaluation End ---
 
     # --- Extract Embeddings Start ---

@@ -100,17 +100,17 @@ def get_results(acc_groups, get_yp_func):
             f"accuracy_{get_yp_func(g)[0]}_{get_yp_func(g)[1]}": acc_groups[g].avg
             for g in groups
     }
-    all_correct = sum([acc_groups[g].sum for g in groups])
-    all_total = sum([acc_groups[g].count for g in groups])
-    results.update({"mean_accuracy" : all_correct / all_total})
-    results.update({"worst_accuracy" : min(results.values())})
+    # all_correct = sum([acc_groups[g].sum for g in groups])
+    # all_total = sum([acc_groups[g].count for g in groups])
+    # results.update({"mean_accuracy" : all_correct / all_total})
+    # results.update({"worst_accuracy" : min(results.values())})
     return results
 
 
 def evaluate(model, loader, get_yp_func, silent=True, GPM=False):
     model.eval()
-    acc_groups = {g_idx : AverageMeter() for g_idx in range(loader.dataset.n_groups)}
-
+    minority_acc = AverageMeter()
+    majority_acc = AverageMeter()
     with torch.no_grad():
         for x, y, g, p, idxs in tqdm.tqdm(loader, disable=silent):
             x, y, p = x.cuda(), y.cuda(), p.cuda()
@@ -118,9 +118,23 @@ def evaluate(model, loader, get_yp_func, silent=True, GPM=False):
                 logits = model(x)[0]
             else:
                 logits = model(x)
-            update_dict(acc_groups, y, g, logits)
+
+            preds = torch.argmax(logits, axis=1)
+            correct_batch = (preds == y)
+
+            # Update minority
+            mask = y != p
+            n = mask.sum().item()
+            corr = correct_batch[mask].sum().item()
+            minority_acc.update(corr / n, n)
+
+            # Update majority
+            mask = y == p
+            n = mask.sum().item()
+            corr = correct_batch[mask].sum().item()
+            majority_acc.update(corr / n, n)
     model.train()
-    return get_results(acc_groups, get_yp_func)
+    return minority_acc, majority_acc
 
 
 class MultiTaskHead(nn.Module):
