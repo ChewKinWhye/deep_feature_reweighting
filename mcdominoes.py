@@ -13,7 +13,7 @@ import torchvision.utils as vision_utils
 from PIL import Image
 import torchvision
 from torchvision import transforms
-
+import pickle
 
 class MCDOMINOES(Dataset):
     def __init__(self, x, y, p, target_resolution):
@@ -34,7 +34,8 @@ class MCDOMINOES(Dataset):
                 torch.arange(self.n_places).unsqueeze(1) == torch.from_numpy(self.p_array)).sum(1).float()
 
         self.transform = transforms.Compose([
-            #transforms.Resize(target_resolution),
+            transforms.RandomCrop(target_resolution, padding=4, padding_mode='reflect'),
+            transforms.RandomHorizontalFlip(),
             #transforms.CenterCrop(target_resolution),
             transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
             ])
@@ -91,6 +92,16 @@ def plot_samples(dataset, nrow=13, figsize=(10,7)):
 
 
 def get_mcdominoes(target_resolution, VAL_SIZE, spurious_strength, indicies_val, indicies_target):
+    if indicies_target is None:
+        save_dir = os.path.join("data", f"mcdominoes_{spurious_strength}-{VAL_SIZE}-NB.pkl")
+    else:
+        save_dir = os.path.join("data", f"mcdominoes_{spurious_strength}-{VAL_SIZE}-B.pkl")
+    if os.path.exists(save_dir):
+        print("Loading Dataset")
+        with open(save_dir, 'rb') as f:
+            train_dataset, balanced_dataset, testset_dict = pickle.load(f)
+        return train_dataset, balanced_dataset, testset_dict
+    print("Generating Dataset")
     # Load mnist train
     transform = torchvision.transforms.Compose([torchvision.transforms.ToTensor()])
     mnist_train_set = torchvision.datasets.MNIST('./data/mnist/', train=True, download=True)
@@ -224,4 +235,6 @@ def get_mcdominoes(target_resolution, VAL_SIZE, spurious_strength, indicies_val,
         balanced_dataset = MCDOMINOES(X_target, Y_target, P_target, target_resolution)
     else:
         balanced_dataset = None
+    with open(save_dir, 'wb') as f:
+        pickle.dump((train_dataset, balanced_dataset, testset_dict), f)
     return train_dataset, balanced_dataset, testset_dict
