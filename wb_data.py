@@ -134,20 +134,26 @@ def get_loader(data, train, reweight_groups, reweight_classes, reweight_places, 
     return loader
 
 
-def log_data(logger, train_data, test_data, val_data=None, get_yp_func=None):
+def log_data(logger, train_data, target_data, val_data, test_data, get_yp_func):
     logger.write(f'Training Data (total {len(train_data)})\n')
-    # group_id = y_id * n_places + place_id
-    # y_id = group_id // n_places
-    # place_id = group_id % n_places
     for group_idx in range(train_data.n_groups):
         y_idx, p_idx = get_yp_func(group_idx)
         logger.write(f'    Group {group_idx} (y={y_idx}, p={p_idx}): n = {train_data.group_counts[group_idx]:.0f}\n')
+
+    if target_data is None:
+        logger.write(f'Target Data is None')
+    else:
+        logger.write(f'Target Data (total {len(target_data)})\n')
+        for group_idx in range(target_data.n_groups):
+            y_idx, p_idx = get_yp_func(group_idx)
+            logger.write(f'    Group {group_idx} (y={y_idx}, p={p_idx}): n = {target_data.group_counts[group_idx]:.0f}\n')
+
     logger.write(f'Test Data (total {len(test_data)})\n')
     for group_idx in range(test_data.n_groups):
         y_idx, p_idx = get_yp_func(group_idx)
         logger.write(f'    Group {group_idx} (y={y_idx}, p={p_idx}): n = {test_data.group_counts[group_idx]:.0f}\n')
-    if val_data is not None:
-        logger.write(f'Validation Data (total {len(val_data)})\n')
-        for group_idx in range(val_data.n_groups):
-            y_idx, p_idx = get_yp_func(group_idx)
-            logger.write(f'    Group {group_idx} (y={y_idx}, p={p_idx}): n = {val_data.group_counts[group_idx]:.0f}\n')
+
+    logger.write(f'Validation Data (total {len(val_data)})\n')
+    for group_idx in range(val_data.n_groups):
+        y_idx, p_idx = get_yp_func(group_idx)
+        logger.write(f'    Group {group_idx} (y={y_idx}, p={p_idx}): n = {val_data.group_counts[group_idx]:.0f}\n')

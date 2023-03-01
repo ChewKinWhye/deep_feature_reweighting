@@ -107,17 +107,14 @@ def get_results(acc_groups, get_yp_func):
     return results
 
 
-def evaluate(model, loader, get_yp_func, silent=True, GPM=False):
+def evaluate(model, loader, silent=True):
     model.eval()
     minority_acc = AverageMeter()
     majority_acc = AverageMeter()
     with torch.no_grad():
         for x, y, g, p, idxs in tqdm.tqdm(loader, disable=silent):
             x, y, p = x.cuda(), y.cuda(), p.cuda()
-            if GPM:
-                logits = model(x)[0]
-            else:
-                logits = model(x)
+            logits = model(x)
 
             preds = torch.argmax(logits, axis=1)
             correct_batch = (preds == y)

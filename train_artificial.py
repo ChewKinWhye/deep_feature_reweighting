@@ -115,7 +115,7 @@ def main(args):
         test_loader_dict[test_name] = DataLoader(testset_v, shuffle=False, **loader_kwargs)
 
     get_yp_func = partial(get_y_p, n_places=trainset.n_places)
-    log_data(logger, trainset, testset_dict['Test'], testset_dict['Validation'], get_yp_func=get_yp_func)
+    log_data(logger, trainset, valset_target, testset_dict['Validation'], testset_dict['Test'], get_yp_func=get_yp_func)
     # --- Data End ---
 
     # --- Model Start ---
@@ -139,7 +139,7 @@ def main(args):
     criterion = torch.nn.CrossEntropyLoss()
     # --- Model End ---
 
-    # For method 7: NashMTL
+    # For method 2: NashMTL
     weight_methods_parameters = {'update_weights_every': 1, 'optim_niter': 20}
     weight_method = WeightMethods("nashmtl", n_tasks=2, device=torch.device('cuda'), **weight_methods_parameters)
 
@@ -205,7 +205,7 @@ def main(args):
         # Evaluation
         # Iterating over datasets we test on
         for test_name, test_loader in test_loader_dict.items():
-            minority_acc, majority_acc = evaluate(model, test_loader, get_yp_func)
+            minority_acc, majority_acc = evaluate(model, test_loader)
             logger.write(f"Minority {test_name} accuracy: {minority_acc:.3f}\t")
             logger.write(f"Majority {test_name} accuracy: {majority_acc:.3f}\n")
 
