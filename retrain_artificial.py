@@ -55,10 +55,11 @@ def dfr_on_validation_tune(
                     minority_acc += correct[x]
                     minority_sum += 1
             if i == 0:
-                worst_accs[c] = minority_acc / minority_acc
+                worst_accs[c] = minority_acc / minority_sum
             else:
-                worst_accs[c] += minority_acc / minority_acc
+                worst_accs[c] += minority_acc / minority_sum
     ks, vs = list(worst_accs.keys()), list(worst_accs.values())
+    print(ks, vs)
     best_hypers = ks[np.argmax(vs)]
     return best_hypers
 
@@ -100,13 +101,13 @@ def dfr_on_validation_eval(
     logreg.intercept_ = np.mean(intercepts, axis=0)
     preds_test = logreg.predict(x_test)
     minority_acc, minority_sum, majority_acc, majority_sum = 0, 0, 0, 0
+    correct = y_test == preds_test
     for i in range(len(y_test)):
-        correct = y_test[i] == preds_test[i]
         if y_test[i] == p_test[i]:
-            majority_acc += correct
+            majority_acc += correct[i]
             majority_sum += 1
         else:
-            minority_acc += correct
+            minority_acc += correct[i]
             minority_sum += 1
     print(minority_acc / minority_sum, majority_acc / majority_sum)
 
@@ -116,7 +117,7 @@ def parse_args():
                         help="Which dataset to use: [cmnist, mcdominoes]")
     parser.add_argument("--val_size", type=int, default=1000, help="Size of validation dataset")
     parser.add_argument("--spurious_strength", type=float, default=1, help="Strength of spurious correlation")
-
+    parser.add_argument("--method", type=int, default=0, help="which method to retrain")
     parser.add_argument(
         "--ckpt_path", type=str, default=None, help="Checkpoint path")
     parser.add_argument(
@@ -136,7 +137,10 @@ def main(args):
 
     # --- Data Start ---
     indicies_val = np.arange(args.val_size)
-    indicies_target = None
+    if args.method != 0:
+        indicies_target = []
+    else:
+        indicies_target = None
 
     # Obtain trainset, valset_target, and testset_dict
     # The valset will be the same datapoints as the valset during the training phase, since the seed is the same

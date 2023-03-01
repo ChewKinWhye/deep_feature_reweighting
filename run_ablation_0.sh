@@ -8,11 +8,11 @@ do
 		do
 			for val_size in 1000
 			do
-				for weight_decay in 1e-3 1e-4
+				for weight_decay in 1e-2
 				do
-					for batch_size in 8 16 32
+					for batch_size in 8
 					do
-						for init_lr in 1e-3 1e-4
+						for init_lr in 1e-4
 						do
 							for seed in 0 1 2
 							do

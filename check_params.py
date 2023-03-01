@@ -3,12 +3,12 @@ import json
 
 # Parameters
 num_seed = 3
-method = 0
+method = "3"
 dataset = "mcdominoes"
 spurious_strength = 0.95
 val_size = 1000
 
-base_path = f"/hpctmp/e0200920/method_{method}"
+base_path = f"/hpctmp/e0200920/method_{method}-2"
 file_initial = f"{method}-{dataset}-{spurious_strength}-{val_size}"
 
 # Filenames
@@ -28,7 +28,11 @@ for file_without_seed in files_without_seed:
         with open(result_path) as f:
             lines = f.readlines()
         # print(lines)
-        best_worst_group_accuracy += float(lines[-1].split()[4][:-2])
+        try:
+            best_worst_group_accuracy += float(lines[-1].split()[4][:-2])
+        except:
+            print(result_path)
+            best_worst_group_accuracy = 0
     results[file_without_seed] = best_worst_group_accuracy / num_seed
 
 # print(results)

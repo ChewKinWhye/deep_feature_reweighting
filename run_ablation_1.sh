@@ -6,15 +6,15 @@ do
 	do
 		for spurious_strength in 1 0.95
 		do
-			for val_size in 200 500 1000
+			for val_size in 1000
 			do
-				for weight_decay in 1e-4
+				for weight_decay in 1e-1 1e-2 1e-3 1e-4
 				do
-					for batch_size in 16
+					for batch_size in 8 16 32
 					do
-						for init_lr in 1e-4
+						for init_lr in 1e-3 1e-4
 						do
-							for seed in 0
+							for seed in 0 1 2
 							do
 								exp_name=$method-$dataset-$spurious_strength-$val_size-$weight_decay-$batch_size-$init_lr-$seed
 								echo $exp_name

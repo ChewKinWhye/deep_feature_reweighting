@@ -4,19 +4,19 @@ for method in 3
 do
 	for dataset in mcdominoes
 	do
-		for spurious_strength in 0.95 1
+		for spurious_strength in 1
 		do
-			for val_size in 200 500 1000
+			for val_size in 1000
 			do
-				for weight_decay in 1e-4
+				for weight_decay in 1e-1
 				do
-					for batch_size in 16
+					for batch_size in 32
 					do
 						for init_lr in 1e-4
 						do
-							for regularize_mode in 0 1 2
+							for regularize_mode in 2
 							do
-								for seed in 0
+								for seed in 0 1 2
 								do
 									exp_name=$method-$dataset-$spurious_strength-$val_size-$weight_decay-$batch_size-$init_lr-$regularize_mode-$seed
 									echo $exp_name
