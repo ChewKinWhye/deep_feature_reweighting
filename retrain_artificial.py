@@ -10,6 +10,7 @@ from torch.utils.data import Dataset, DataLoader
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 from utils import set_seed, evaluate, get_y_p, get_embed
+from wb_data import WaterBirdsDataset, wb_transform
 
 C_OPTIONS = [0.01, 0.05, 0.1, 0.5, 1, 1.5, 2, 2.5, 3]
 REG = "l1"
@@ -145,6 +146,30 @@ def main(args):
     elif args.dataset == "mcdominoes":
         target_resolution = (64, 32)
         trainset, valset_target, testset_dict = get_mcdominoes(target_resolution, args.val_size, args.spurious_strength, indicies_val, indicies_target)
+    elif args.dataset == "waterbirds":
+        data_dir = "/hpctmp/e0200920/waterbird_complete95_forest2water2"
+        target_resolution = (224, 224)
+        train_transform = wb_transform(target_resolution=target_resolution, train=True, augment_data=True)
+        test_transform = wb_transform(target_resolution=target_resolution, train=False, augment_data=False)
+        trainset = WaterBirdsDataset(basedir=data_dir, split="train", transform=train_transform)
+        if indicies_target is not None:
+            valset_target = WaterBirdsDataset(basedir=data_dir, split="val", transform=train_transform, indicies=indicies_target)
+        else:
+            valset_target = None
+        testset_dict = {
+            'Test': WaterBirdsDataset(basedir=data_dir, split="test", transform=test_transform),
+            'Validation': WaterBirdsDataset(basedir=data_dir, split="val", transform=test_transform, indicies=indicies_val),
+        }
+        if args.spurious_strength == 1:
+            group_counts = trainset.group_counts
+            minority_groups = np.argsort(group_counts.numpy())[:2]
+            idx = np.where(np.logical_and.reduce([trainset.group_array != g for g in minority_groups], initial=True))[0]
+            trainset.y_array = trainset.y_array[idx]
+            trainset.group_array = trainset.group_array[idx]
+            trainset.confounder_array = trainset.confounder_array[idx]
+            trainset.filename_array = trainset.filename_array[idx]
+            trainset.metadata_df = trainset.metadata_df.iloc[idx]
+
 
     num_classes, num_places = testset_dict["Test"].n_classes, testset_dict["Test"].n_places
 
