@@ -41,8 +41,7 @@ def dfr_on_validation_tune(
 
         class_weight = {0: 1., 1: 1.}
         for c in C_OPTIONS:
-            logreg = LogisticRegression(penalty=REG, C=c, solver="liblinear",
-                                        class_weight=class_weight)
+            logreg = LogisticRegression(penalty=REG, C=c, solver="liblinear")
             logreg.fit(x_train, y_train)
             preds_val = logreg.predict(x_val)
             minority_acc, minority_sum, majority_acc, majority_sum = 0, 0, 0, 0
@@ -65,8 +64,7 @@ def dfr_on_validation_tune(
 
 
 def dfr_on_validation_eval(
-        c, all_embeddings, all_y, all_p, num_retrains=30, w1=1, w2=1,
-        preprocess=True):
+        c, all_embeddings, all_y, all_p, num_retrains=30, preprocess=True):
     coefs, intercepts = [], []
     if preprocess:
         scaler = StandardScaler()
@@ -79,8 +77,7 @@ def dfr_on_validation_eval(
         if preprocess:
             x_train = scaler.transform(x_train)
 
-        logreg = LogisticRegression(penalty=REG, C=c, solver="liblinear",
-                                    class_weight={0: w1, 1: w2})
+        logreg = LogisticRegression(penalty=REG, C=c, solver="liblinear")
         logreg.fit(x_train, y_train)
         coefs.append(logreg.coef_)
         intercepts.append(logreg.intercept_)
@@ -92,8 +89,7 @@ def dfr_on_validation_eval(
 
     if preprocess:
         x_test = scaler.transform(x_test)
-    logreg = LogisticRegression(penalty=REG, C=c, solver="liblinear",
-                                class_weight={0: w1, 1: w2})
+    logreg = LogisticRegression(penalty=REG, C=c, solver="liblinear")
     n_classes = np.max(y_train) + 1
     # the fit is only needed to set up logreg
     logreg.fit(x_train[:n_classes], np.arange(n_classes))
@@ -177,9 +173,9 @@ def main(args):
     print("Base Model Results")
     base_model_results = {}
     get_yp_func = partial(get_y_p, n_places=trainset.n_places)
-    base_model_results["test"] = evaluate(model, test_loader, get_yp_func, silent=True)
-    base_model_results["val"] = evaluate(model, val_loader, get_yp_func, silent=True)
-    base_model_results["train"] = evaluate(model, train_loader, get_yp_func, silent=True)
+    base_model_results["test"] = evaluate(model, test_loader, silent=True)
+    base_model_results["val"] = evaluate(model, val_loader, silent=True)
+    base_model_results["train"] = evaluate(model, train_loader, silent=True)
     print(base_model_results)
     # --- Base Model Evaluation End ---
 

@@ -122,16 +122,18 @@ def evaluate(model, loader, silent=True):
             # Update minority
             mask = y != p
             n = mask.sum().item()
-            corr = correct_batch[mask].sum().item()
-            minority_acc.update(corr / n, n)
+            if n != 0:
+                corr = correct_batch[mask].sum().item()
+                minority_acc.update(corr / n, n)
 
             # Update majority
             mask = y == p
             n = mask.sum().item()
-            corr = correct_batch[mask].sum().item()
-            majority_acc.update(corr / n, n)
+            if n != 0:
+                corr = correct_batch[mask].sum().item()
+                majority_acc.update(corr / n, n)
     model.train()
-    return minority_acc, majority_acc
+    return minority_acc.avg, majority_acc.avg
 
 
 class MultiTaskHead(nn.Module):

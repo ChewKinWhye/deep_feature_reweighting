@@ -3,12 +3,12 @@ import json
 
 # Parameters
 num_seed = 3
-method = "3"
+method = "3-1"
 dataset = "mcdominoes"
-spurious_strength = 0.95
+spurious_strength = 1
 val_size = 1000
 
-base_path = f"/hpctmp/e0200920/method_{method}-2"
+base_path = f"/hpctmp/e0200920/method_{method}"
 file_initial = f"{method}-{dataset}-{spurious_strength}-{val_size}"
 
 # Filenames
@@ -25,6 +25,9 @@ for file_without_seed in files_without_seed:
         file_with_seed = file_without_seed + f"-{seed}"
         # print(file_with_seed)
         result_path = os.path.join(base_path, file_with_seed, "log.txt")
+        if not os.path.exists(result_path):
+            print(result_path)
+            continue
         with open(result_path) as f:
             lines = f.readlines()
         # print(lines)

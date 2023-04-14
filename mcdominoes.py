@@ -16,11 +16,12 @@ from torchvision import transforms
 import pickle
 
 class MCDOMINOES(Dataset):
-    def __init__(self, x, y, p, target_resolution):
+    def __init__(self, x, y, p, target_resolution, isTrain):
         scale = 28.0 / 32.0
         self.x = x
         self.y_array = np.array(y)
         self.p_array = np.array(p)
+        self.isTrain = isTrain
         self.confounder_array = np.array(p)
         self.n_classes = np.unique(self.y_array).size
         self.n_places = np.unique(self.confounder_array).size
@@ -32,13 +33,19 @@ class MCDOMINOES(Dataset):
                 torch.arange(self.n_classes).unsqueeze(1) == torch.from_numpy(self.y_array)).sum(1).float()
         self.p_counts = (
                 torch.arange(self.n_places).unsqueeze(1) == torch.from_numpy(self.p_array)).sum(1).float()
-
-        self.transform = transforms.Compose([
-            transforms.RandomCrop(target_resolution, padding=4, padding_mode='reflect'),
-            transforms.RandomHorizontalFlip(),
-            #transforms.CenterCrop(target_resolution),
-            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
-            ])
+        
+        if isTrain:
+            self.transform = transforms.Compose([
+                transforms.RandomCrop(target_resolution, padding=4, padding_mode='reflect'),
+                transforms.RandomHorizontalFlip(),
+                #transforms.CenterCrop(target_resolution),
+                transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+                ])
+        else:
+            self.transform = transforms.Compose([
+                transforms.CenterCrop(target_resolution),
+                transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+                ])
 
     def __len__(self):
         return len(self.y_array)
@@ -224,15 +231,15 @@ def get_mcdominoes(target_resolution, VAL_SIZE, spurious_strength, indicies_val,
     P_test = mnist_test_target
     Y_test = cifar_test_target
 
-    train_dataset = MCDOMINOES(X_train, Y_train, P_train, target_resolution)
-    val_dataset = MCDOMINOES(X_val, Y_val, P_val, target_resolution)
-    test_dataset = MCDOMINOES(X_test, Y_test, P_test, target_resolution)
+    train_dataset = MCDOMINOES(X_train, Y_train, P_train, target_resolution, True)
+    val_dataset = MCDOMINOES(X_val, Y_val, P_val, target_resolution, False)
+    test_dataset = MCDOMINOES(X_test, Y_test, P_test, target_resolution, False)
     testset_dict = {
         'Test': test_dataset,
         'Validation': val_dataset,
     }
     if indicies_target is not None:
-        balanced_dataset = MCDOMINOES(X_target, Y_target, P_target, target_resolution)
+        balanced_dataset = MCDOMINOES(X_target, Y_target, P_target, target_resolution, True)
     else:
         balanced_dataset = None
     with open(save_dir, 'wb') as f:

@@ -4,15 +4,15 @@ for method in 0
 do
 	for dataset in mcdominoes
 	do
-		for spurious_strength in 0.95
+		for spurious_strength in 1 
 		do
 			for val_size in 1000
 			do
-				for weight_decay in 1e-2
+				for weight_decay in 1e-1 1e-2 1e-3 1e-4
 				do
-					for batch_size in 8
+					for batch_size in 4 8 16 32
 					do
-						for init_lr in 1e-4
+						for init_lr in 1e-2 1e-3 1e-4
 						do
 							for seed in 0 1 2
 							do
