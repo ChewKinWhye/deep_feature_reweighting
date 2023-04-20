@@ -151,7 +151,7 @@ class CMNIST(Dataset):
          torch.flatten(torch.Tensor(np.vstack(p_batch))), torch.flatten(torch.Tensor(np.vstack(idx_batch)))
 
 
-def get_cmnist(target_resolution, VAL_SIZE, spurious_strength, indicies_val, indicies_target):
+def get_cmnist(target_resolution, VAL_SIZE, spurious_strength, indicies_val=None, indicies_target=None):
     # Train
     train_set = torchvision.datasets.MNIST('./data/mnist/', train=True, download=True)
     train_input = train_set.data.view(-1, 1, 28, 28).float()

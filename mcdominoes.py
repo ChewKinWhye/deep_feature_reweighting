@@ -98,11 +98,8 @@ def plot_samples(dataset, nrow=13, figsize=(10,7)):
     plt.show()
 
 
-def get_mcdominoes(target_resolution, VAL_SIZE, spurious_strength, indicies_val, indicies_target):
-    if indicies_target is None:
-        save_dir = os.path.join("data", f"mcdominoes_{spurious_strength}-{VAL_SIZE}-NB.pkl")
-    else:
-        save_dir = os.path.join("data", f"mcdominoes_{spurious_strength}-{VAL_SIZE}-B.pkl")
+def get_mcdominoes(target_resolution, VAL_SIZE, spurious_strength, indicies_val=None, indicies_target=None):
+    save_dir = os.path.join("data", f"mcdominoes_{spurious_strength}-{VAL_SIZE}.pkl")
     if os.path.exists(save_dir):
         print("Loading Dataset")
         with open(save_dir, 'rb') as f:
@@ -216,8 +213,8 @@ def get_mcdominoes(target_resolution, VAL_SIZE, spurious_strength, indicies_val,
     X_val = torch.cat((mnist_val_input, cifar_val_input), dim=2)
     P_val = mnist_val_target
     Y_val = cifar_val_target
-    if indicies_target is not None:
-        X_target, P_target, Y_target = X_val[indicies_target], P_val[indicies_target], Y_val[indicies_target]
+
+    X_target, P_target, Y_target = X_val[indicies_target], P_val[indicies_target], Y_val[indicies_target]
     X_val, P_val, Y_val = X_val[indicies_val], P_val[indicies_val], Y_val[indicies_val]
 
     rand_perm = torch.randperm(len(mnist_test_input))
@@ -238,10 +235,7 @@ def get_mcdominoes(target_resolution, VAL_SIZE, spurious_strength, indicies_val,
         'Test': test_dataset,
         'Validation': val_dataset,
     }
-    if indicies_target is not None:
-        balanced_dataset = MCDOMINOES(X_target, Y_target, P_target, target_resolution, True)
-    else:
-        balanced_dataset = None
+    balanced_dataset = MCDOMINOES(X_target, Y_target, P_target, target_resolution, True)
     with open(save_dir, 'wb') as f:
         pickle.dump((train_dataset, balanced_dataset, testset_dict), f)
     return train_dataset, balanced_dataset, testset_dict

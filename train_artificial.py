@@ -23,6 +23,7 @@ from methods.weight_methods import WeightMethods
 from cmnist import get_cmnist
 from mcdominoes import get_mcdominoes
 from torch.utils.data import Dataset, DataLoader
+import pickle
 
 
 def parse_args():
@@ -82,16 +83,12 @@ def main(args):
     # --- Logger End ---
 
     # --- Data Start ---
-    if args.method == 0:
-        indicies_val = np.arange(args.val_size)
-        indicies_target = None
-    else:
-        indicies = np.arange(args.val_size)
-        np.random.shuffle(indicies)
-        # First half for val
-        indicies_val = indicies[:len(indicies) // 2]
-        # Second half for target
-        indicies_target = indicies[len(indicies) // 2:]
+    indicies = np.arange(args.val_size)
+    np.random.shuffle(indicies)
+    # First half for val
+    indicies_val = indicies[:len(indicies) // 2]
+    # Second half for target
+    indicies_target = indicies[len(indicies) // 2:]
 
     # Obtain trainset, valset_target, and testset_dict
     if args.dataset == "cmnist":
@@ -102,28 +99,32 @@ def main(args):
         trainset, valset_target, testset_dict = get_mcdominoes(target_resolution, args.val_size, args.spurious_strength, indicies_val, indicies_target)
     elif args.dataset == "waterbirds":
         data_dir = "/hpctmp/e0200920/waterbird_complete95_forest2water2"
-        target_resolution = (224, 224)
-        train_transform = wb_transform(target_resolution=target_resolution, train=True, augment_data=True)
-        test_transform = wb_transform(target_resolution=target_resolution, train=False, augment_data=False)
-        trainset = WaterBirdsDataset(basedir=data_dir, split="train", transform=train_transform)
-        if indicies_target is not None:
-            valset_target = WaterBirdsDataset(basedir=data_dir, split="val", transform=train_transform, indicies=indicies_target)
+        save_dir = os.path.join("data", f"waterbirds_{args.spurious_strength}-{args.val_size}.pkl")
+        if os.path.exists(save_dir):
+            print("Loading Dataset")
+            with open(save_dir, 'rb') as f:
+                trainset, valset_target, testset_dict = pickle.load(f)
         else:
-            valset_target = None
-        testset_dict = {
-            'Test': WaterBirdsDataset(basedir=data_dir, split="test", transform=test_transform),
-            'Validation': WaterBirdsDataset(basedir=data_dir, split="val", transform=test_transform, indicies=indicies_val),
-        }
-        if args.spurious_strength == 1:
-            group_counts = trainset.group_counts
-            minority_groups = np.argsort(group_counts.numpy())[:2]
-            idx = np.where(np.logical_and.reduce([trainset.group_array != g for g in minority_groups], initial=True))[0]
-            trainset.y_array = trainset.y_array[idx]
-            trainset.group_array = trainset.group_array[idx]
-            trainset.confounder_array = trainset.confounder_array[idx]
-            trainset.filename_array = trainset.filename_array[idx]
-            trainset.metadata_df = trainset.metadata_df.iloc[idx]
-
+            target_resolution = (224, 224)
+            train_transform = wb_transform(target_resolution=target_resolution, train=True, augment_data=True)
+            test_transform = wb_transform(target_resolution=target_resolution, train=False, augment_data=False)
+            trainset = WaterBirdsDataset(basedir=data_dir, split="train", transform=train_transform)
+            valset_target = WaterBirdsDataset(basedir=data_dir, split="val", transform=train_transform, indicies=indicies_target)
+            testset_dict = {
+                'Test': WaterBirdsDataset(basedir=data_dir, split="test", transform=test_transform),
+                'Validation': WaterBirdsDataset(basedir=data_dir, split="val", transform=test_transform, indicies=indicies_val),
+            }
+            if args.spurious_strength == 1:
+                group_counts = trainset.group_counts
+                minority_groups = np.argsort(group_counts.numpy())[:2]
+                idx = np.where(np.logical_and.reduce([trainset.group_array != g for g in minority_groups], initial=True))[0]
+                trainset.y_array = trainset.y_array[idx]
+                trainset.group_array = trainset.group_array[idx]
+                trainset.confounder_array = trainset.confounder_array[idx]
+                trainset.filename_array = trainset.filename_array[idx]
+                trainset.metadata_df = trainset.metadata_df.iloc[idx]
+            with open(save_dir, 'wb') as f:
+                pickle.dump((trainset, valset_target, testset_dict), f)
 
     num_classes, num_places = testset_dict["Test"].n_classes, testset_dict["Test"].n_places
 

@@ -11,6 +11,9 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 from utils import set_seed, evaluate, get_y_p, get_embed
 from wb_data import WaterBirdsDataset, wb_transform
+import pickle
+import os
+
 
 C_OPTIONS = [0.01, 0.05, 0.1, 0.5, 1, 1.5, 2, 2.5, 3]
 REG = "l1"
@@ -132,44 +135,18 @@ def main(args):
     set_seed(args.seed)
     # --- Logger End ---
 
-    # --- Data Start ---
-    indicies_val = np.arange(args.val_size)
-    if args.method != 0:
-        indicies_target = []
-    else:
-        indicies_target = None
-
     # Obtain trainset, valset_target, and testset_dict
     if args.dataset == "cmnist":
         target_resolution = (32, 32)
-        trainset, valset_target, testset_dict = get_cmnist(target_resolution, args.val_size, args.spurious_strength, indicies_val, indicies_target)
+        trainset, valset_target, testset_dict = get_cmnist(target_resolution, args.val_size, args.spurious_strength)
     elif args.dataset == "mcdominoes":
         target_resolution = (64, 32)
-        trainset, valset_target, testset_dict = get_mcdominoes(target_resolution, args.val_size, args.spurious_strength, indicies_val, indicies_target)
+        trainset, valset_target, testset_dict = get_mcdominoes(target_resolution, args.val_size, args.spurious_strength)
     elif args.dataset == "waterbirds":
-        data_dir = "/hpctmp/e0200920/waterbird_complete95_forest2water2"
-        target_resolution = (224, 224)
-        train_transform = wb_transform(target_resolution=target_resolution, train=True, augment_data=True)
-        test_transform = wb_transform(target_resolution=target_resolution, train=False, augment_data=False)
-        trainset = WaterBirdsDataset(basedir=data_dir, split="train", transform=train_transform)
-        if indicies_target is not None:
-            valset_target = WaterBirdsDataset(basedir=data_dir, split="val", transform=train_transform, indicies=indicies_target)
-        else:
-            valset_target = None
-        testset_dict = {
-            'Test': WaterBirdsDataset(basedir=data_dir, split="test", transform=test_transform),
-            'Validation': WaterBirdsDataset(basedir=data_dir, split="val", transform=test_transform, indicies=indicies_val),
-        }
-        if args.spurious_strength == 1:
-            group_counts = trainset.group_counts
-            minority_groups = np.argsort(group_counts.numpy())[:2]
-            idx = np.where(np.logical_and.reduce([trainset.group_array != g for g in minority_groups], initial=True))[0]
-            trainset.y_array = trainset.y_array[idx]
-            trainset.group_array = trainset.group_array[idx]
-            trainset.confounder_array = trainset.confounder_array[idx]
-            trainset.filename_array = trainset.filename_array[idx]
-            trainset.metadata_df = trainset.metadata_df.iloc[idx]
-
+        print("Loading Dataset")
+        save_dir = os.path.join("data", f"waterbirds_{args.spurious_strength}-{args.val_size}.pkl")
+        with open(save_dir, 'rb') as f:
+            trainset, valset_target, testset_dict = pickle.load(f)
 
     num_classes, num_places = testset_dict["Test"].n_classes, testset_dict["Test"].n_places
 
@@ -179,7 +156,7 @@ def main(args):
     test_loader = DataLoader(
         testset_dict["Test"], shuffle=True, **loader_kwargs)
     val_loader = DataLoader(
-        testset_dict["Validation"], shuffle=True, **loader_kwargs)
+        valset_target, shuffle=True, **loader_kwargs)
 
     # --- Data End ---
 
@@ -199,7 +176,7 @@ def main(args):
     base_model_results = {}
     get_yp_func = partial(get_y_p, n_places=trainset.n_places)
     base_model_results["test"] = evaluate(model, test_loader, silent=True)
-    base_model_results["val"] = evaluate(model, val_loader, silent=True)
+    # base_model_results["val"] = evaluate(model, val_loader, silent=True)
     base_model_results["train"] = evaluate(model, train_loader, silent=True)
     print(base_model_results)
     # --- Base Model Evaluation End ---
@@ -232,14 +209,14 @@ def main(args):
     # --- Extract Embeddings End ---
 
     # DFR on validation
-    print("Validation Tune")
+    print("Target Tune")
     dfr_val_results = {}
     c = dfr_on_validation_tune(all_embeddings, all_y, all_p)
 
     dfr_val_results["best_hypers"] = c
     print("Best C value:", c)
 
-    print("Validation Test")
+    print("Test")
     dfr_on_validation_eval(c, all_embeddings, all_y, all_p)
 
 if __name__ == "__main__":
