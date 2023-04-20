@@ -3,7 +3,7 @@ import json
 
 # Parameters
 num_seed = 3
-method = "3-1"
+method = "3-0"
 dataset = "mcdominoes"
 spurious_strength = 1
 val_size = 1000
@@ -26,7 +26,7 @@ for file_without_seed in files_without_seed:
         # print(file_with_seed)
         result_path = os.path.join(base_path, file_with_seed, "log.txt")
         if not os.path.exists(result_path):
-            print(result_path)
+            print("Does not Exist: ", result_path)
             continue
         with open(result_path) as f:
             lines = f.readlines()
@@ -34,7 +34,7 @@ for file_without_seed in files_without_seed:
         try:
             best_worst_group_accuracy += float(lines[-1].split()[4][:-2])
         except:
-            print(result_path)
+            print("No Results: ", result_path)
             best_worst_group_accuracy = 0
     results[file_without_seed] = best_worst_group_accuracy / num_seed
 

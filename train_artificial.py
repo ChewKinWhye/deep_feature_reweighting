@@ -224,7 +224,6 @@ def main(args):
             scheduler.step()
 
         # Save results
-        logger.write(f"Epoch {epoch}\t ERM Loss: {loss_meter.avg:.3f}\t Method Loss: {method_loss_meter.avg:.3f}\t Time Taken: {time.time()-start:.3f}\n")
 
         # Evaluation
         # Iterating over datasets we test on
@@ -238,7 +237,7 @@ def main(args):
             torch.save(
                 model.state_dict(), os.path.join(args.output_dir, 'best_checkpoint.pt'))
             best_worst_acc = minority_acc
-
+        logger.write(f"Epoch {epoch}\t ERM Loss: {loss_meter.avg:.3f}\t Method Loss: {method_loss_meter.avg:.3f}\t Time Taken: {time.time()-start:.3f}\n")
         logger.write('\n')
 
     torch.save(model.state_dict(), os.path.join(args.output_dir, 'final_checkpoint.pt'))
