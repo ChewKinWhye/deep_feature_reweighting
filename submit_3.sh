@@ -16,6 +16,6 @@ image="/app1/common/singularity-img/3.0.0/pytorch_1.11_cuda_11.3_cudnn8-py38.sif
 singularity exec $image bash << EOF > stdout.$PBS_JOBID 2> stderr.$PBS_JOBID
 export PYTHONPATH=$PYTHONPATH:/home/svu/e0200920/volta_pypkg/lib/python3.8/site-packages
 
-python train_artificial.py --pretrained_model --num_epochs 10 --method=$method --dataset=$dataset --spurious_strength=$spurious_strength --val_size=$val_size --weight_decay=$weight_decay --batch_size=$batch_size --init_lr=$init_lr --regularize_mode=$regularize_mode --group_size=$group_size --seed=$seed --output_dir=/hpctmp/e0200920/$method-$regularize_mode-$dataset-$spurious_strength-$val_size-$weight_decay-$batch_size-$init_lr-$group_size-$seed
+python train.py --pretrained_model --num_epochs 10 --method=$method --dataset=$dataset --spurious_strength=$spurious_strength --val_size=$val_size --weight_decay=$weight_decay --batch_size=$batch_size --init_lr=$init_lr --regularize_mode=$regularize_mode --group_size=$group_size --seed=$seed --output_dir=/hpctmp/e0200920/$method-$regularize_mode-$dataset-$spurious_strength-$val_size-$weight_decay-$batch_size-$init_lr-$group_size-$seed
 
 EOF

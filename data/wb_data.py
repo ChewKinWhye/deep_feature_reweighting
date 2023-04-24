@@ -8,6 +8,38 @@ from torch.utils.data import Dataset, DataLoader
 from torch.utils.data.sampler import WeightedRandomSampler
 
 
+def get_waterbirds(target_resolution, val_size, spurious_strength, data_dir, indicies_val, indicies_target):
+    save_dir = os.path.join(data_dir, f"waterbirds_{spurious_strength}-{val_size}.pkl")
+    if os.path.exists(save_dir):
+        print("Loading Dataset")
+        with open(save_dir, 'rb') as f:
+            train_set, target_set, test_set_dict = pickle.load(f)
+    else:
+        train_transform = wb_transform(target_resolution=target_resolution, train=True, augment_data=True)
+        test_transform = wb_transform(target_resolution=target_resolution, train=False, augment_data=False)
+        train_set = WaterBirdsDataset(basedir=data_dir, split="train", transform=train_transform)
+        target_set = WaterBirdsDataset(basedir=data_dir, split="val", transform=train_transform,
+                                       indicies=indicies_target)
+        test_set_dict = {
+            'Test': WaterBirdsDataset(basedir=data_dir, split="test", transform=test_transform),
+            'Validation': WaterBirdsDataset(basedir=data_dir, split="val", transform=test_transform,
+                                            indicies=indicies_val),
+        }
+        if spurious_strength == 1:
+            group_counts = train_set.group_counts
+            minority_groups = np.argsort(group_counts.numpy())[:2]
+            idx = np.where(np.logical_and.reduce([train_set.group_array != g for g in minority_groups], initial=True))[
+                0]
+            train_set.y_array = train_set.y_array[idx]
+            train_set.group_array = train_set.group_array[idx]
+            train_set.confounder_array = train_set.confounder_array[idx]
+            train_set.filename_array = train_set.filename_array[idx]
+            train_set.metadata_df = train_set.metadata_df.iloc[idx]
+        with open(save_dir, 'wb') as f:
+            pickle.dump((train_set, target_set, test_set_dict), f)
+    return train_set, target_set, test_set_dict
+
+
 class WaterBirdsDataset(Dataset):
     def __init__(self, basedir, split="train", transform=None, indicies=None):
         try:

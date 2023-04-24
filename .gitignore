@@ -6,7 +6,10 @@ images
 unused
 main_results
 MTL*
-data
+data/celeba
+data/cifar10
+data/FashionMNIST
+data/mnist
 logs
 std*
 pytorch*

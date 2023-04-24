@@ -98,8 +98,8 @@ def plot_samples(dataset, nrow=13, figsize=(10,7)):
     plt.show()
 
 
-def get_mcdominoes(target_resolution, VAL_SIZE, spurious_strength, indicies_val=None, indicies_target=None):
-    save_dir = os.path.join("data", f"mcdominoes_{spurious_strength}-{VAL_SIZE}.pkl")
+def get_mcdominoes(target_resolution, VAL_SIZE, spurious_strength, data_dir, indicies_val=None, indicies_target=None):
+    save_dir = os.path.join(data_dir, f"mcdominoes_{spurious_strength}-{VAL_SIZE}.pkl")
     if os.path.exists(save_dir):
         print("Loading Dataset")
         with open(save_dir, 'rb') as f:
