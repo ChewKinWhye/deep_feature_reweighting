@@ -148,10 +148,19 @@ def main(args):
     d = model.fc.in_features
     model.fc = torch.nn.Linear(d, num_classes)
     model.cuda()
-
+    
     if args.method == 3:
-        optimizer = BalancedOptimizer(model.parameters(), mode=args.regularize_mode, group_size=args.group_size, lr=args.init_lr, momentum=args.momentum_decay,
-                                      weight_decay=args.weight_decay)
+        # Separate optimizers for shared parameters (FE) and non-shared parameters (head)
+        model.fc = None
+        optimizer = BalancedOptimizer(model.parameters(), mode=args.regularize_mode, group_size=args.group_size, lr=args.init_lr, momentum=args.momentum_decay, weight_decay=args.weight_decay)
+        # Create a separate linear layer for the main dataset
+        fc_main = torch.nn.Linear(d, num_classes)
+        fc_main.cuda()
+        fc_balanced = torch.nn.Linear(d, num_classes)
+        fc_balanced.cuda()
+        fc_params = params = list(fc_main.parameters()) + list(fc_balanced.parameters())
+        fc_optimizer =  torch.optim.SGD(
+            fc_params, lr=args.init_lr, momentum=args.momentum_decay, weight_decay=args.weight_decay)
     else:
         optimizer = torch.optim.SGD(
             model.parameters(), lr=args.init_lr, momentum=args.momentum_decay, weight_decay=args.weight_decay)
@@ -184,6 +193,10 @@ def main(args):
             optimizer.zero_grad()
 
             # --- Methods Start ---
+            if args.method == 3:
+                fc_optimizer.zero_grad()
+                # Swap classification head before forward pass
+                model.fc = fc_main
             logits = model(x)
             loss = criterion(logits, y)
 
@@ -208,13 +221,17 @@ def main(args):
                 # Balanced Optimizer
                 elif args.method == 3:
                     loss.backward()
+                    # Update main classification head using the main gradients
                     optimizer.store_gradients("main")
                     optimizer.zero_grad()
-
+                    
+                    # Swap back classification head
+                    model.fc = fc_balanced
                     logits_b = model(x_b)
                     method_loss = criterion(logits_b, y_b)
                     method_loss.backward()
                     optimizer.store_gradients("balanced")
+                    fc_optimizer.step()
 
             optimizer.step()
             method_loss_meter.update(method_loss, x.size(0))

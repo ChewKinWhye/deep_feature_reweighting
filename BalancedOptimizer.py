@@ -79,13 +79,15 @@ class BalancedOptimizer(Optimizer):
                 # Every layer will have 4 adaptive learning rates
                 # Bias and linear layers will only have one adaptive learning rate
                 original_size = main_d_p.size()
-                if len(main_d_p.size()) > 2:
+                if len(original_size) > 2:
+                    # For kernels, we group them into groups of kernels
                     num_groups = int(main_d_p.size()[0] / self.group_size)
                     main_d_p = main_d_p.view(num_groups, -1)
                     balanced_d_p = balanced_d_p.view(num_groups, -1)
                     adaptive_learning_rate = torch.nn.CosineSimilarity(dim=1)(torch.flatten(main_d_p, start_dim=1), torch.flatten(balanced_d_p, start_dim=1))
                     adaptive_learning_rate = adaptive_learning_rate.view(-1, 1)
                 else:
+                    # For biases, we simply flatten to get the cosine similarity
                     adaptive_learning_rate = torch.nn.CosineSimilarity(dim=0)(torch.flatten(main_d_p), torch.flatten(balanced_d_p))
                 if self.mode == 0:
                     adaptive_learning_rate = (adaptive_learning_rate + 1) / 2
@@ -95,6 +97,7 @@ class BalancedOptimizer(Optimizer):
                     adaptive_learning_rate = adaptive_learning_rate
                 elif self.mode == 3:
                     adaptive_learning_rate = torch.maximum(torch.sign(adaptive_learning_rate), torch.zeros_like(adaptive_learning_rate))
+                    
                 d_p = main_d_p * adaptive_learning_rate + balanced_d_p
                 d_p = d_p.view(original_size)
                 if self.weight_decay != 0:
