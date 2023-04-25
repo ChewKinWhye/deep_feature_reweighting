@@ -98,8 +98,8 @@ def plot_samples(dataset, nrow=13, figsize=(10,7)):
     plt.show()
 
 
-def get_mcdominoes(target_resolution, VAL_SIZE, spurious_strength, data_dir, indicies_val=None, indicies_target=None):
-    save_dir = os.path.join(data_dir, f"mcdominoes_{spurious_strength}-{VAL_SIZE}.pkl")
+def get_mcdominoes(target_resolution, VAL_SIZE, spurious_strength, data_dir, seed, indicies_val=None, indicies_target=None):
+    save_dir = os.path.join(data_dir, f"mcdominoes_{spurious_strength}-{VAL_SIZE}-{seed}.pkl")
     if os.path.exists(save_dir):
         print("Loading Dataset")
         with open(save_dir, 'rb') as f:
@@ -108,7 +108,7 @@ def get_mcdominoes(target_resolution, VAL_SIZE, spurious_strength, data_dir, ind
     print("Generating Dataset")
     # Load mnist train
     transform = torchvision.transforms.Compose([torchvision.transforms.ToTensor()])
-    mnist_train_set = torchvision.datasets.MNIST('./data/mnist/', train=True, download=True)
+    mnist_train_set = torchvision.datasets.MNIST(os.path.join(data_dir, "mnist"), train=True, download=True)
     mnist_train_input = mnist_train_set.data.view(-1, 1, 28, 28).float()/255.0
     mnist_train_target = mnist_train_set.targets
     rand_perm = torch.randperm(len(mnist_train_input))
@@ -116,12 +116,12 @@ def get_mcdominoes(target_resolution, VAL_SIZE, spurious_strength, data_dir, ind
     mnist_train_target = mnist_train_target[rand_perm]
 
     # Load mnist test
-    mnist_test_set = torchvision.datasets.MNIST('./data/mnist/', train=False, download=True)
+    mnist_test_set = torchvision.datasets.MNIST(os.path.join(data_dir, "mnist"), train=False, download=True)
     mnist_test_input = mnist_test_set.data.view(-1, 1, 28, 28).float()/255.0
     mnist_test_target = mnist_test_set.targets
 
     # Load cifar train
-    cifar_train_set = torchvision.datasets.CIFAR10('./data/cifar10/', train=True, download=True, transform=transform)
+    cifar_train_set = torchvision.datasets.CIFAR10(os.path.join(data_dir, "cifar10"), train=True, download=True, transform=transform)
     cifar_train_input = []
     cifar_train_target = []
     for x, y in cifar_train_set:
@@ -134,7 +134,7 @@ def get_mcdominoes(target_resolution, VAL_SIZE, spurious_strength, data_dir, ind
     cifar_train_target = cifar_train_target[rand_perm]
 
     # Load cifar test
-    cifar_test_set = torchvision.datasets.CIFAR10('./data/cifar10/', train=False, download=True, transform=transform)
+    cifar_test_set = torchvision.datasets.CIFAR10(os.path.join(data_dir, "cifar10"), train=False, download=True, transform=transform)
     cifar_test_input = []
     cifar_test_target = []
     for x, y in cifar_test_set:

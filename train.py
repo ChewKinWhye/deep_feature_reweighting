@@ -25,7 +25,7 @@ def parse_args():
                         help="Which dataset to use: [cmnist, mcdominoes]")
     parser.add_argument("--data_dir", type=str, default="data",
                         help="Directory where data is located")
-    parser.add_argument("--val_size", type=int, default=1000, help="Size of validation dataset")
+    parser.add_argument("--val_target_size", type=int, default=1000, help="Size of validation+target dataset")
     parser.add_argument("--spurious_strength", type=float, default=1, help="Strength of spurious correlation")
 
     # Output Directory
@@ -76,7 +76,7 @@ def main(args):
     # --- Logger End ---
 
     # --- Data Start ---
-    indicies = np.arange(args.val_size)
+    indicies = np.arange(args.val_target_size)
     np.random.shuffle(indicies)
     # Explicitly split dataset into train-target-val-test split
     # First half for val
@@ -88,12 +88,12 @@ def main(args):
     train_set, target_set, test_set_dict = None, None, None
     if args.dataset == "mcdominoes":
         target_resolution = (64, 32)
-        train_set, target_set, test_set_dict = get_mcdominoes(target_resolution, args.val_size, args.spurious_strength,
-                                                              args.data_dir, indicies_val, indicies_target)
+        train_set, target_set, test_set_dict = get_mcdominoes(target_resolution, args.val_target_size, args.spurious_strength,
+                                                              args.data_dir, args.seed, indicies_val, indicies_target)
     elif args.dataset == "waterbirds":
         target_resolution = (224, 224)
-        train_set, target_set, test_set_dict = get_waterbirds(target_resolution, args.val_size, args.spurious_strength,
-                                                              args.data_dir, indicies_val, indicies_target)
+        train_set, target_set, test_set_dict = get_waterbirds(target_resolution, args.val_target_size, args.spurious_strength,
+                                                              args.data_dir, args.seed, indicies_val, indicies_target)
 
     num_classes, num_places = test_set_dict["Test"].n_classes, test_set_dict["Test"].n_places
     loader_kwargs = {'batch_size': args.batch_size, 'num_workers': 4, 'pin_memory': True}
@@ -109,7 +109,7 @@ def main(args):
         test_loader_dict[test_name] = DataLoader(testset_v, shuffle=False, **loader_kwargs)
 
     get_yp_func = partial(get_y_p, n_places=target_set.n_places)
-    log_data(logger, target_set, target_set, test_set_dict['Validation'], test_set_dict['Test'], get_yp_func=get_yp_func)
+    log_data(logger, train_set, target_set, test_set_dict['Validation'], test_set_dict['Test'], get_yp_func=get_yp_func)
     # --- Data End ---
 
     # --- Model Start ---

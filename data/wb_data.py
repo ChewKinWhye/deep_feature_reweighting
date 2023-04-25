@@ -8,8 +8,8 @@ from torch.utils.data import Dataset, DataLoader
 from torch.utils.data.sampler import WeightedRandomSampler
 
 
-def get_waterbirds(target_resolution, val_size, spurious_strength, data_dir, indicies_val, indicies_target):
-    save_dir = os.path.join(data_dir, f"waterbirds_{spurious_strength}-{val_size}.pkl")
+def get_waterbirds(target_resolution, val_size, spurious_strength, data_dir, seed, indicies_val=None, indicies_target=None):
+    save_dir = os.path.join(data_dir, f"waterbirds_{spurious_strength}-{val_size}-{seed}.pkl")
     if os.path.exists(save_dir):
         print("Loading Dataset")
         with open(save_dir, 'rb') as f:
