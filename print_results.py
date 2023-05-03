@@ -22,14 +22,17 @@ for spurious_strength in [0.8, 0.9, 0.95, 1]:
         results = []
         for seed in range(num_seed):
             log_dir = os.path.join(base_dir, f"{method}-{dataset}-{spurious_strength}-{val_target_size}-{weight_decay}-{batch_size}-{init_lr}-{seed}", "log.txt")
-            print(log_dir)
             with open(log_dir) as f:
                 lines = f.readlines()
-            best_validation = float(f"{lines[-1].split()[4][:-2]:.3f}")
+            best_validation = round(float(lines[-1].split()[4][:-2]), 3)
             for i in range(len(lines)):
-                if float(lines[i].split()[4]) == best_validation:
-                    print("Found!")
-                    results.append(lines[i-1].split()[4])
-
+                try:
+                    if lines[i].split()[1] == "Validation" and float(lines[i].split()[3]) == best_validation:
+                        results.append(float(lines[i-1].split()[3]))
+                        break
+                except:
+                    continue
+        if len(results) != num_seed:
+            print("ERROR")
         results = np.array(results) * 100
         print(f"{spurious_strength}, {val_target_size}, {np.mean(results):.2f}, {np.std(results):.2f}")
