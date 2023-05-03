@@ -25,9 +25,11 @@ for spurious_strength in [0.8, 0.9, 0.95, 1]:
             print(log_dir)
             with open(log_dir) as f:
                 lines = f.readlines()
-            results.append(float(lines[-1].split()[4][:-2]))
+            best_validation = float(f"{lines[-1].split()[4][:-2]:.3f}")
+            for i in range(len(lines)):
+                if float(lines[i].split()[4]) == best_validation:
+                    print("Found!")
+                    results.append(lines[i-1].split()[4])
 
         results = np.array(results) * 100
         print(f"{spurious_strength}, {val_target_size}, {np.mean(results):.2f}, {np.std(results):.2f}")
-
-
