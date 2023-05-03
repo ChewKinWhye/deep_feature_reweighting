@@ -4,13 +4,13 @@ import numpy as np
 import tqdm
 import argparse
 from functools import partial
-from cmnist import get_cmnist
-from mcdominoes import get_mcdominoes
+from data.mcdominoes import get_mcdominoes
 from torch.utils.data import Dataset, DataLoader
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
-from utils import set_seed, evaluate, get_y_p, get_embed
-from wb_data import WaterBirdsDataset, wb_transform
+from utils import set_seed, evaluate, get_y_p, get_embed, Logger
+from data.wb_data import WaterBirdsDataset, get_loader, wb_transform, log_data, get_waterbirds
+
 import pickle
 import os
 
@@ -18,8 +18,8 @@ import os
 C_OPTIONS = [0.01, 0.05, 0.1, 0.5, 1, 1.5, 2, 2.5, 3]
 REG = "l1"
 
-def dfr_on_validation_tune(
-        all_embeddings, all_y, all_p, preprocess=True, num_retrains=30):
+def dfr_on_target_tune(
+        all_embeddings, all_y, all_p, num_retrains=30):
 
     worst_accs = {}
     for i in range(num_retrains):
@@ -27,26 +27,15 @@ def dfr_on_validation_tune(
         x_val = all_embeddings["val"]
         y_val = all_y["val"]
         p_val = all_p["val"]
-        n_val = len(x_val) // 2
-        idx = np.arange(len(x_val))
-        np.random.shuffle(idx)
 
-        # Split validation data into half
-        x_train = x_val[idx[n_val:]]
-        y_train = y_val[idx[n_val:]]
+        x_target = all_embeddings["target"]
+        y_target = all_y["target"]
+        p_target = all_p["target"]
 
-        x_val = x_val[idx[:n_val]]
-        y_val = y_val[idx[:n_val]]
-        p_val = p_val[idx[:n_val]]
-        if preprocess:
-            scaler = StandardScaler()
-            x_train = scaler.fit_transform(x_train)
-            x_val = scaler.transform(x_val)
 
-        class_weight = {0: 1., 1: 1.}
         for c in C_OPTIONS:
             logreg = LogisticRegression(penalty=REG, C=c, solver="liblinear")
-            logreg.fit(x_train, y_train)
+            logreg.fit(x_target, y_target)
             preds_val = logreg.predict(x_val)
             minority_acc, minority_sum, majority_acc, majority_sum = 0, 0, 0, 0
             correct = y_val == preds_val
@@ -62,27 +51,20 @@ def dfr_on_validation_tune(
             else:
                 worst_accs[c] += minority_acc / minority_sum
     ks, vs = list(worst_accs.keys()), list(worst_accs.values())
-    print(ks, vs)
     best_hypers = ks[np.argmax(vs)]
     return best_hypers
 
 
-def dfr_on_validation_eval(
-        c, all_embeddings, all_y, all_p, num_retrains=30, preprocess=True):
+def dfr_on_target_eval(
+        c, all_embeddings, all_y, all_p, num_retrains=30):
     coefs, intercepts = [], []
-    if preprocess:
-        scaler = StandardScaler()
-        scaler.fit(all_embeddings["train"])
 
     for i in range(num_retrains):
-        x_train = all_embeddings["val"]
-        y_train = all_y["val"]
-
-        if preprocess:
-            x_train = scaler.transform(x_train)
+        x_target = all_embeddings["target"]
+        y_target = all_y["target"]
 
         logreg = LogisticRegression(penalty=REG, C=c, solver="liblinear")
-        logreg.fit(x_train, y_train)
+        logreg.fit(x_target, y_target)
         coefs.append(logreg.coef_)
         intercepts.append(logreg.intercept_)
 
@@ -91,12 +73,10 @@ def dfr_on_validation_eval(
     p_test = all_p["test"]
     # print(np.bincount(g_test))
 
-    if preprocess:
-        x_test = scaler.transform(x_test)
     logreg = LogisticRegression(penalty=REG, C=c, solver="liblinear")
-    n_classes = np.max(y_train) + 1
+    n_classes = np.max(y_target) + 1
     # the fit is only needed to set up logreg
-    logreg.fit(x_train[:n_classes], np.arange(n_classes))
+    logreg.fit(x_target[:n_classes], np.arange(n_classes))
     logreg.coef_ = np.mean(coefs, axis=0)
     logreg.intercept_ = np.mean(intercepts, axis=0)
     preds_test = logreg.predict(x_test)
@@ -109,7 +89,7 @@ def dfr_on_validation_eval(
         else:
             minority_acc += correct[i]
             minority_sum += 1
-    print(minority_acc / minority_sum, majority_acc / majority_sum)
+    return minority_acc / minority_sum, majority_acc / majority_sum
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Tune and evaluate DFR.")
@@ -117,13 +97,16 @@ def parse_args():
                         help="Which dataset to use: [cmnist, mcdominoes]")
     parser.add_argument("--val_size", type=int, default=1000, help="Size of validation dataset")
     parser.add_argument("--spurious_strength", type=float, default=1, help="Strength of spurious correlation")
-    parser.add_argument("--method", type=int, default=0, help="which method to retrain")
     parser.add_argument(
         "--ckpt_path", type=str, default=None, help="Checkpoint path")
     parser.add_argument(
         "--batch_size", type=int, default=100, required=False,
         help="Checkpoint path")
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument(
+        "--output_dir", type=str,
+        default="logs/",
+        help="Output directory")
 
     args = parser.parse_args()
 
@@ -132,36 +115,36 @@ def parse_args():
 
 # parameters in config overwrites the parser arguments
 def main(args):
+    logger = Logger(os.path.join(args.output_dir, 'log.txt'))
+
     set_seed(args.seed)
     # --- Logger End ---
 
     # Obtain trainset, valset_target, and testset_dict
-    if args.dataset == "cmnist":
-        target_resolution = (32, 32)
-        trainset, valset_target, testset_dict = get_cmnist(target_resolution, args.val_size, args.spurious_strength)
-    elif args.dataset == "mcdominoes":
+    if args.dataset == "mcdominoes":
         target_resolution = (64, 32)
-        trainset, valset_target, testset_dict = get_mcdominoes(target_resolution, args.val_size, args.spurious_strength)
+        train_set, target_set, test_set_dict = get_mcdominoes(target_resolution, args.val_target_size, args.spurious_strength,
+                                                              args.data_dir, args.seed)
     elif args.dataset == "waterbirds":
-        print("Loading Dataset")
-        save_dir = os.path.join("data", f"waterbirds_{args.spurious_strength}-{args.val_size}.pkl")
-        with open(save_dir, 'rb') as f:
-            trainset, valset_target, testset_dict = pickle.load(f)
+        target_resolution = (224, 224)
+        train_set, target_set, test_set_dict = get_waterbirds(target_resolution, args.val_target_size,
+                                                              args.spurious_strength,
+                                                              args.data_dir, args.seed)
 
-    num_classes, num_places = testset_dict["Test"].n_classes, testset_dict["Test"].n_places
+    num_classes, num_places = test_set_dict["Test"].n_classes, test_set_dict["Test"].n_places
 
     loader_kwargs = {'batch_size': args.batch_size, 'num_workers': 4, 'pin_memory': True}
 
-    train_loader = DataLoader(trainset, shuffle=True, **loader_kwargs)
-    test_loader = DataLoader(
-        testset_dict["Test"], shuffle=True, **loader_kwargs)
+    target_loader = DataLoader(
+        target_set, shuffle=True, **loader_kwargs)
     val_loader = DataLoader(
-        valset_target, shuffle=True, **loader_kwargs)
-
+        test_set_dict["Validation"], shuffle=True, **loader_kwargs)
+    test_loader = DataLoader(
+        test_set_dict["Test"], shuffle=True, **loader_kwargs)
     # --- Data End ---
 
     # --- Model Start ---
-    n_classes = trainset.n_classes
+    n_classes = train_set.n_classes
     model = torchvision.models.resnet18(pretrained=False)
     d = model.fc.in_features
     model.fc = torch.nn.Linear(d, n_classes)
@@ -172,31 +155,23 @@ def main(args):
     model.eval()
 
     # --- Base Model Evaluation Start ---
-    print("Base Model Results")
+    logger.write("Base Model Results")
     base_model_results = {}
-    get_yp_func = partial(get_y_p, n_places=trainset.n_places)
     base_model_results["test"] = evaluate(model, test_loader, silent=True)
-    # base_model_results["val"] = evaluate(model, val_loader, silent=True)
-    base_model_results["train"] = evaluate(model, train_loader, silent=True)
-    print(base_model_results)
+    logger.write(base_model_results)
     # --- Base Model Evaluation End ---
 
     # --- Extract Embeddings Start ---
-    print("Extract Embeddings")
+    logger.write("Extract Embeddings")
     model.eval()
     all_embeddings = {}
     all_y, all_p, all_g = {}, {}, {}
-    for name, loader in [("train", train_loader), ("test", test_loader), ("val", val_loader)]:
+    for name, loader in [("target", target_loader), ("val", val_loader), ("test", test_loader)]:
         all_embeddings[name] = []
         all_y[name], all_p[name], all_g[name] = [], [], []
         for x, y, g, p, idxs in tqdm.tqdm(loader, disable=True):
             with torch.no_grad():
-                # print(get_embed(model, x.cuda()).detach().cpu().numpy().shape)
                 emb = get_embed(model, x.cuda()).detach().cpu().numpy()
-                # Only do retraining on subset of last layer features
-                # dividing_point = emb.shape[1]//10 * 9
-                # emb = emb[:, :dividing_point]
-
                 all_embeddings[name].append(emb)
                 all_y[name].append(y.detach().cpu().numpy())
                 all_g[name].append(g.detach().cpu().numpy())
@@ -209,15 +184,17 @@ def main(args):
     # --- Extract Embeddings End ---
 
     # DFR on validation
-    print("Target Tune")
+    logger.write("Target Tune")
     dfr_val_results = {}
-    c = dfr_on_validation_tune(all_embeddings, all_y, all_p)
+    c = dfr_on_target_tune(all_embeddings, all_y, all_p)
 
     dfr_val_results["best_hypers"] = c
-    print("Best C value:", c)
+    logger.write(f"Best C value: {c}")
 
-    print("Test")
-    dfr_on_validation_eval(c, all_embeddings, all_y, all_p)
+    logger.write("Test")
+    minority_test_acc, majority_test_acc = dfr_on_target_eval(c, all_embeddings, all_y, all_p)
+    logger.write(f"Majority Test Accuracy: {majority_test_acc}")
+    logger.write(f"Minority Test Accuracy: {minority_test_acc}")
 
 if __name__ == "__main__":
     args = parse_args()
