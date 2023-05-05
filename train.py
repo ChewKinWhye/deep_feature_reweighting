@@ -13,6 +13,9 @@ from AuxiliaryOptimizer import AuxiliaryOptimizer
 from utils import Logger, AverageMeter, set_seed, evaluate, get_y_p
 from data.mcdominoes import get_mcdominoes
 from torch.utils.data import Dataset, DataLoader
+from data.celeba import get_celeba
+
+
 import pickle
 
 
@@ -92,6 +95,10 @@ def main(args):
     elif args.dataset == "waterbirds":
         target_resolution = (224, 224)
         train_set, target_set, test_set_dict = get_waterbirds(target_resolution, args.val_target_size, args.spurious_strength,
+                                                              args.data_dir, args.seed, indicies_val, indicies_target)
+    elif args.dataset == "celeba":
+        target_resolution = (224, 224)
+        train_set, target_set, test_set_dict = get_celeba(target_resolution, args.val_target_size, args.spurious_strength,
                                                               args.data_dir, args.seed, indicies_val, indicies_target)
 
     num_classes, num_places = test_set_dict["Test"].n_classes, test_set_dict["Test"].n_places

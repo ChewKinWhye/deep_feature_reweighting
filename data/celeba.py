@@ -22,9 +22,9 @@ import torchvision.transforms as transforms
 
 from matplotlib.ticker import NullFormatter
 
-# TODO: Remove minority
+
 class CELEBA(Dataset):
-    def __init__(self, x, y, p):
+    def __init__(self, x, y, p, target_resolution):
         self.x = x
         self.y_array = np.array(y)
         self.p_array = np.array(p)
@@ -42,8 +42,7 @@ class CELEBA(Dataset):
 
         self.transform = transforms.Compose(
             [
-                transforms.CenterCrop(178),
-                transforms.Resize(224),
+                transforms.Resize(target_resolution),
                 transforms.ToTensor(),
                 transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
             ]
@@ -76,22 +75,37 @@ class CELEBA(Dataset):
                torch.flatten(torch.Tensor(np.vstack(p_batch))), torch.flatten(torch.Tensor(np.vstack(idx_batch)))
 
 
+
 # This celeba considers the inverse problem, where the target feature is the gender and the spurious feature
 # is the hair color. This setup makes the spurious feature easier to learn than the target feature
-def get_celeba():
-    data_path = "data"
-    root = os.path.join(data_path, "celeba/img_align_celeba/")
-    metadata = os.path.join(data_path, "metadata_celeba.csv")
-
+def get_celeba(target_resolution, VAL_SIZE, spurious_strength, data_dir, seed, indicies_val=None, indicies_target=None):
+    root = os.path.join(data_dir, "img_align_celeba")
+    metadata = os.path.join(data_dir, "metadata_celeba.csv")
     df = pd.read_csv(metadata)
+
+    # Train dataset
     train_df = df[df["split"] == ({"tr": 0, "va": 1, "te": 2}["tr"])]
-    train_df_x = df["filename"].astype(str).map(lambda x: os.path.join(root, x)).tolist()
+    train_df_x = train_df["filename"].astype(str).map(lambda x: os.path.join(root, x)).tolist()
     # y==0 is non-blonde and y==1 is blonde
-    train_df_y = df["y"].tolist()
-    train_df_g = np.array(df["a"].tolist())
-
-    train_dataset = CELEBA(train_df_x, train_df_y, train_df_g)
+    train_df_y = train_df["y"].tolist()
+    train_df_a = np.array(train_df["a"].tolist())
+    train_set = CELEBA(train_df_x, train_df_y, train_df_a, target_resolution)
+    print(train_set.group_counts)
     val_df = df[df["split"] == ({"tr": 0, "va": 1, "te": 2}["va"])]
-    test_df = df[df["split"] == ({"tr": 0, "va": 1, "te": 2}["te"])]
+    val_df_x = val_df["filename"].astype(str).map(lambda x: os.path.join(root, x)).tolist()
+    val_df_y = val_df["y"].tolist()
+    val_df_a = np.array(val_df["a"].tolist())
+    val_dataset = CELEBA(val_df_x, val_df_y, val_df_a, target_resolution)
 
-get_celeba()
+
+    test_df = df[df["split"] == ({"tr": 0, "va": 1, "te": 2}["te"])]
+    test_df_x = test_df["filename"].astype(str).map(lambda x: os.path.join(root, x)).tolist()
+    test_df_y = test_df["y"].tolist()
+    test_df_a = np.array(test_df["a"].tolist())
+    test_dataset = CELEBA(test_df_x, test_df_y, test_df_a, target_resolution)
+
+    testset_dict = {
+        'Test': test_dataset,
+        'Validation': val_dataset,
+    }
+
