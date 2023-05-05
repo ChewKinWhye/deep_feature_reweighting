@@ -111,6 +111,8 @@ def evaluate(model, loader, silent=True):
     model.eval()
     minority_acc = AverageMeter()
     majority_acc = AverageMeter()
+    avg_acc = AverageMeter()
+
     with torch.no_grad():
         for x, y, g, p, idxs in tqdm.tqdm(loader, disable=silent):
             x, y, p = x.cuda(), y.cuda(), p.cuda()
@@ -118,7 +120,8 @@ def evaluate(model, loader, silent=True):
 
             preds = torch.argmax(logits, axis=1)
             correct_batch = (preds == y)
-
+            # Update average
+            avg_acc.update(correct_batch.sum().item() / len(y), len(y))
             # Update minority
             mask = y != p
             n = mask.sum().item()
@@ -133,7 +136,7 @@ def evaluate(model, loader, silent=True):
                 corr = correct_batch[mask].sum().item()
                 majority_acc.update(corr / n, n)
     model.train()
-    return minority_acc.avg, majority_acc.avg
+    return minority_acc.avg, majority_acc.avg, avg_acc.avg
 
 
 class MultiTaskHead(nn.Module):

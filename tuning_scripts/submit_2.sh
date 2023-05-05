@@ -4,7 +4,7 @@
 #PBS -j oe
 #PBS -N pytorch
 #PBS -l select=1:ncpus=10:mem=80gb:ngpus=1
-#PBS -l walltime=3:00:00
+#PBS -l walltime=6:00:00
 #PBS -P 11002407
 
 cd $PBS_O_WORKDIR;

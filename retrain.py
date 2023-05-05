@@ -89,13 +89,13 @@ def dfr_on_target_eval(
         else:
             minority_acc += correct[i]
             minority_sum += 1
-    return minority_acc / minority_sum, majority_acc / majority_sum
+    return minority_acc / minority_sum, majority_acc / majority_sum, sum(correct) / len(y_test)
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Tune and evaluate DFR.")
     parser.add_argument("--dataset", type=str, default="cmnist",
                         help="Which dataset to use: [cmnist, mcdominoes]")
-    parser.add_argument("--val_size", type=int, default=1000, help="Size of validation dataset")
+    parser.add_argument("--val_target_size", type=int, default=1000, help="Size of validation dataset")
     parser.add_argument("--spurious_strength", type=float, default=1, help="Strength of spurious correlation")
     parser.add_argument(
         "--ckpt_path", type=str, default=None, help="Checkpoint path")
@@ -107,6 +107,8 @@ def parse_args():
         "--output_dir", type=str,
         default="logs/",
         help="Output directory")
+    parser.add_argument("--data_dir", type=str, default="data",
+                        help="Directory where data is located")
 
     args = parser.parse_args()
 
@@ -115,6 +117,7 @@ def parse_args():
 
 # parameters in config overwrites the parser arguments
 def main(args):
+    os.makedirs(args.output_dir, exist_ok=True)
     logger = Logger(os.path.join(args.output_dir, 'log.txt'))
 
     set_seed(args.seed)
@@ -155,14 +158,14 @@ def main(args):
     model.eval()
 
     # --- Base Model Evaluation Start ---
-    logger.write("Base Model Results")
+    logger.write("Base Model Results\n")
     base_model_results = {}
-    base_model_results["test"] = evaluate(model, test_loader, silent=True)
-    logger.write(base_model_results)
+    base_model_results = evaluate(model, test_loader, silent=True)
+    logger.write(f"Minority: {base_model_results[0]}, Majority: {base_model_results[1]}\n")
     # --- Base Model Evaluation End ---
 
     # --- Extract Embeddings Start ---
-    logger.write("Extract Embeddings")
+    logger.write("Extract Embeddings\n")
     model.eval()
     all_embeddings = {}
     all_y, all_p, all_g = {}, {}, {}
@@ -184,17 +187,18 @@ def main(args):
     # --- Extract Embeddings End ---
 
     # DFR on validation
-    logger.write("Target Tune")
+    logger.write("Target Tune\n")
     dfr_val_results = {}
     c = dfr_on_target_tune(all_embeddings, all_y, all_p)
 
     dfr_val_results["best_hypers"] = c
-    logger.write(f"Best C value: {c}")
+    logger.write(f"Best C value: {c}\n")
 
-    logger.write("Test")
-    minority_test_acc, majority_test_acc = dfr_on_target_eval(c, all_embeddings, all_y, all_p)
-    logger.write(f"Majority Test Accuracy: {majority_test_acc}")
-    logger.write(f"Minority Test Accuracy: {minority_test_acc}")
+    logger.write("Test\n")
+    minority_test_acc, majority_test_acc, avg_test_acc = dfr_on_target_eval(c, all_embeddings, all_y, all_p)
+    logger.write(f"Majority Test Accuracy: {majority_test_acc}\n")
+    logger.write(f"Average Test Accuracy: {avg_test_acc}\n")
+    logger.write(f"Minority Test Accuracy: {minority_test_acc}\n")
 
 if __name__ == "__main__":
     args = parse_args()

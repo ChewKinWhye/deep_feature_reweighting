@@ -2,7 +2,7 @@
 
 method=2
 dataset="mcdominoes"
-regularize_mode=3
+regularize_mode=1
 
 weight_decay=1e-3
 batch_size=16

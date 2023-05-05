@@ -11,7 +11,6 @@ from functools import partial
 from data.wb_data import WaterBirdsDataset, get_loader, wb_transform, log_data, get_waterbirds
 from AuxiliaryOptimizer import AuxiliaryOptimizer
 from utils import Logger, AverageMeter, set_seed, evaluate, get_y_p
-from methods.weight_methods import WeightMethods
 from data.mcdominoes import get_mcdominoes
 from torch.utils.data import Dataset, DataLoader
 import pickle
@@ -210,8 +209,9 @@ def main(args):
         # Evaluation
         # Iterating over datasets we test on
         for test_name, test_loader in test_loader_dict.items():
-            minority_acc, majority_acc = evaluate(model, test_loader)
+            minority_acc, majority_acc, avg_acc = evaluate(model, test_loader)
             logger.write(f"Minority {test_name} accuracy: {minority_acc:.3f}\t")
+            logger.write(f"Average {test_name} accuracy: {avg_acc:.3f}\t")
             logger.write(f"Majority {test_name} accuracy: {majority_acc:.3f}\n")
 
         # Save best model based on worst group accuracy
