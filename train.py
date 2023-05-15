@@ -99,7 +99,7 @@ def main(args):
     elif args.dataset == "celeba":
         target_resolution = (224, 224)
         train_set, target_set, test_set_dict = get_celeba(target_resolution, args.val_target_size, args.spurious_strength,
-                                                              args.data_dir, args.seed, indicies_val, indicies_target)
+                                                              args.data_dir, args.seed)
 
     num_classes, num_places = test_set_dict["Test"].n_classes, test_set_dict["Test"].n_places
     loader_kwargs = {'batch_size': args.batch_size, 'num_workers': 4, 'pin_memory': True}
@@ -119,7 +119,10 @@ def main(args):
     # --- Data End ---
 
     # --- Model Start ---
-    model = torchvision.models.resnet18(pretrained=args.pretrained_model)
+    if args.dataset == "mcdominoes":
+        model = torchvision.models.resnet18(pretrained=args.pretrained_model)
+    else:
+        model = torchvision.models.resnet50(pretrained=args.pretrained_model)
     d = model.fc.in_features
     model.fc = torch.nn.Linear(d, num_classes)
     model.cuda()
@@ -137,6 +140,7 @@ def main(args):
         fc_params = list(fc_train.parameters()) + list(fc_target.parameters())
         fc_optimizer = torch.optim.SGD(
             fc_params, lr=args.init_lr, momentum=args.momentum_decay, weight_decay=args.weight_decay)
+        average_cosine_similarity = []
     else:
         optimizer = torch.optim.SGD(
             model.parameters(), lr=args.init_lr, momentum=args.momentum_decay, weight_decay=args.weight_decay)
@@ -154,6 +158,8 @@ def main(args):
     best_worst_acc = 0
 
     for epoch in range(args.num_epochs):
+        if args.method == 2:
+            similarity_meter = AverageMeter()
         model.train()
         # Track metrics
         loss_meter = AverageMeter()
@@ -203,7 +209,9 @@ def main(args):
                 fc_optimizer.step()
 
             # Update main model
-            optimizer.step()
+            opt_out = optimizer.step()
+            if args.method == 2:
+                similarity_meter.update(opt_out[1], x.size(0))
             method_loss_meter.update(method_loss, x.size(0))
             loss_meter.update(loss, x.size(0))
             # --- Methods Ends ---
@@ -227,6 +235,8 @@ def main(args):
                 model.state_dict(), os.path.join(args.output_dir, 'best_checkpoint.pt'))
             best_worst_acc = minority_acc
         logger.write(f"Epoch {epoch}\t ERM Loss: {loss_meter.avg:.3f}\t Method Loss: {method_loss_meter.avg:.3f}\t Time Taken: {time.time()-start:.3f}\n")
+        if args.method == 2:
+            logger.write(f"Average cosine similarity: {similarity_meter.avg:.10f}")
         logger.write('\n')
 
     torch.save(model.state_dict(), os.path.join(args.output_dir, 'final_checkpoint.pt'))

@@ -10,7 +10,7 @@ batch_size_array=(8 16 32 64)
 lr_array=(1e-2 1e-3 1e-4)
 
 
-for i in {1..20}
+for i in {1..30}
 do
 	echo $i
 	weight_decay=${weight_decay_array[$(( RANDOM % 4 ))]}

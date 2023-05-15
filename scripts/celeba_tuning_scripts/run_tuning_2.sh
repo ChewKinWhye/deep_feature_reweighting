@@ -1,18 +1,18 @@
 #! /bin/sh
 
 method=2
-dataset="mcdominoes"
+dataset="celeba"
 spurious_strength=1
 val_target_size=2000
 regularize_mode=0
 
 weight_decay_array=(1e-1 1e-2 1e-3 1e-4)
-batch_size_array=(8 16 32 64)
+batch_size_array=(16 32 64 128)
 lr_array=(1e-2 1e-3 1e-4)
 group_size_array=(1 4 16 64)
 
 
-for i in {1..20}
+for i in {1..30}
 do
 	echo $i
 	weight_decay=${weight_decay_array[$(( RANDOM % 4 ))]}

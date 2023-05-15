@@ -10,6 +10,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 from utils import set_seed, evaluate, get_y_p, get_embed, Logger
 from data.wb_data import WaterBirdsDataset, get_loader, wb_transform, log_data, get_waterbirds
+from data.celeba import get_celeba
 
 import pickle
 import os
@@ -19,7 +20,7 @@ C_OPTIONS = [0.01, 0.05, 0.1, 0.5, 1, 1.5, 2, 2.5, 3]
 REG = "l1"
 
 def dfr_on_target_tune(
-        all_embeddings, all_y, all_p, num_retrains=30):
+        all_embeddings, all_y, all_p, num_retrains=10):
 
     worst_accs = {}
     for i in range(num_retrains):
@@ -56,7 +57,7 @@ def dfr_on_target_tune(
 
 
 def dfr_on_target_eval(
-        c, all_embeddings, all_y, all_p, num_retrains=30):
+        c, all_embeddings, all_y, all_p, num_retrains=10):
     coefs, intercepts = [], []
 
     for i in range(num_retrains):
@@ -71,6 +72,9 @@ def dfr_on_target_eval(
     x_test = all_embeddings["test"]
     y_test = all_y["test"]
     p_test = all_p["test"]
+    x_val = all_embeddings["val"]
+    y_val = all_y["val"]
+    p_val = all_p["val"]
     # print(np.bincount(g_test))
 
     logreg = LogisticRegression(penalty=REG, C=c, solver="liblinear")
@@ -79,6 +83,7 @@ def dfr_on_target_eval(
     logreg.fit(x_target[:n_classes], np.arange(n_classes))
     logreg.coef_ = np.mean(coefs, axis=0)
     logreg.intercept_ = np.mean(intercepts, axis=0)
+
     preds_test = logreg.predict(x_test)
     minority_acc, minority_sum, majority_acc, majority_sum = 0, 0, 0, 0
     correct = y_test == preds_test
@@ -89,7 +94,14 @@ def dfr_on_target_eval(
         else:
             minority_acc += correct[i]
             minority_sum += 1
-    return minority_acc / minority_sum, majority_acc / majority_sum, sum(correct) / len(y_test)
+    preds_val = logreg.predict(x_val)
+    minority_acc_val, minority_sum_val = 0, 0
+    correct_val = y_val == preds_val
+    for i in range(len(y_val)):
+        if y_val[i] != p_val[i]:
+            minority_acc_val += correct_val[i]
+            minority_sum_val += 1
+    return minority_acc_val / minority_sum_val, minority_acc / minority_sum, majority_acc / majority_sum, sum(correct) / len(y_test)
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Tune and evaluate DFR.")
@@ -117,9 +129,6 @@ def parse_args():
 
 # parameters in config overwrites the parser arguments
 def main(args):
-    os.makedirs(args.output_dir, exist_ok=True)
-    logger = Logger(os.path.join(args.output_dir, 'log.txt'))
-
     set_seed(args.seed)
     # --- Logger End ---
 
@@ -133,7 +142,10 @@ def main(args):
         train_set, target_set, test_set_dict = get_waterbirds(target_resolution, args.val_target_size,
                                                               args.spurious_strength,
                                                               args.data_dir, args.seed)
-
+    elif args.dataset == "celeba":
+        target_resolution = (224, 224)
+        train_set, target_set, test_set_dict = get_celeba(target_resolution, args.val_target_size, args.spurious_strength,
+                                                              args.data_dir, args.seed)
     num_classes, num_places = test_set_dict["Test"].n_classes, test_set_dict["Test"].n_places
 
     loader_kwargs = {'batch_size': args.batch_size, 'num_workers': 4, 'pin_memory': True}
@@ -148,14 +160,24 @@ def main(args):
 
     # --- Model Start ---
     n_classes = train_set.n_classes
-    model = torchvision.models.resnet18(pretrained=False)
-    d = model.fc.in_features
-    model.fc = torch.nn.Linear(d, n_classes)
-    model.load_state_dict(torch.load(
-        args.ckpt_path
-    ))
+    if args.dataset == "mcdominoes":
+        model = torchvision.models.resnet18(pretrained=True)
+    else:
+        model = torchvision.models.resnet50(pretrained=True)
+    if args.ckpt_path is None:
+        print("No checkpoint provided, using pretrained imagenet model")
+    else:
+        d = model.fc.in_features
+        model.fc = torch.nn.Linear(d, n_classes)
+        model.load_state_dict(torch.load(
+            args.ckpt_path
+        ))
     model.cuda()
     model.eval()
+    
+    os.makedirs(args.output_dir, exist_ok=True)
+    logger = Logger(os.path.join(args.output_dir, 'log.txt'))
+
 
     # --- Base Model Evaluation Start ---
     logger.write("Base Model Results\n")
@@ -195,7 +217,8 @@ def main(args):
     logger.write(f"Best C value: {c}\n")
 
     logger.write("Test\n")
-    minority_test_acc, majority_test_acc, avg_test_acc = dfr_on_target_eval(c, all_embeddings, all_y, all_p)
+    minority_val_acc, minority_test_acc, majority_test_acc, avg_test_acc = dfr_on_target_eval(c, all_embeddings, all_y, all_p)
+    logger.write(f"Minority Val Accuracy: {minority_val_acc}\n")
     logger.write(f"Majority Test Accuracy: {majority_test_acc}\n")
     logger.write(f"Average Test Accuracy: {avg_test_acc}\n")
     logger.write(f"Minority Test Accuracy: {minority_test_acc}\n")

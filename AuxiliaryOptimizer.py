@@ -1,5 +1,7 @@
 import torch
 from torch.optim import Optimizer
+import matplotlib.pyplot as plt
+import numpy as np
 
 
 class AuxiliaryOptimizer(Optimizer):
@@ -70,6 +72,7 @@ class AuxiliaryOptimizer(Optimizer):
                 and returns the loss.
         """
         loss = None
+        average_cosine_sim = []
         for params_with_grad, main_d_p_list, balanced_d_p_list, momentum_buffer_list in zip(self.params_with_grad_total, self.gradients["train"], self.gradients["balanced"], self.momentum_buffer):
             for i, param in enumerate(params_with_grad):
                 main_d_p = main_d_p_list[i]
@@ -81,11 +84,17 @@ class AuxiliaryOptimizer(Optimizer):
                 original_size = main_d_p.size()
                 if len(original_size) > 2:
                     # For kernels, we group them into groups of kernels
-                    num_groups = int(main_d_p.size()[0] / self.group_size)
+                    #num_groups = int(main_d_p.size()[0] / self.group_size)
+                    if main_d_p.size()[1] == 3:
+                        num_groups = int(main_d_p.size()[0])
+                    else:
+                        num_groups = int(main_d_p.size()[0] * main_d_p.size()[1] / self.group_size)
                     main_d_p = main_d_p.view(num_groups, -1)
                     balanced_d_p = balanced_d_p.view(num_groups, -1)
                     adaptive_learning_rate = torch.nn.CosineSimilarity(dim=1)(torch.flatten(main_d_p, start_dim=1), torch.flatten(balanced_d_p, start_dim=1))
                     adaptive_learning_rate = adaptive_learning_rate.view(-1, 1)
+                    cosine_sim = torch.flatten(adaptive_learning_rate).cpu().tolist()
+                    average_cosine_sim.append(sum(cosine_sim)/len(cosine_sim))
                 else:
                     # For biases, we simply flatten to get the cosine similarity
                     adaptive_learning_rate = torch.nn.CosineSimilarity(dim=0)(torch.flatten(main_d_p), torch.flatten(balanced_d_p))
@@ -121,4 +130,16 @@ class AuxiliaryOptimizer(Optimizer):
                 state = self.state[p]
                 state['momentum_buffer'] = momentum_buffer
         self.reset()
-        return loss
+        '''
+        plt.hist(average_cosine_sim, 100)
+        plt.ylabel('Frequency')
+        plt.xlabel('Cosine Similarity')
+        plt.autoscale()
+        plt.savefig(f"cosine_hist_{self.group_size}.png", format="png", dpi=1200)
+        plt.clf()
+        print(np.std(np.array(average_cosine_sim)))
+        exit()
+        '''
+        print(average_cosine_sim)
+        average_cosine_sim = sum(average_cosine_sim) / len(average_cosine_sim)
+        return loss, average_cosine_sim

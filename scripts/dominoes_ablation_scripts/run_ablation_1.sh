@@ -7,9 +7,9 @@ weight_decay=1e-3
 batch_size=16
 init_lr=1e-3
 
-for spurious_strength in 0.8 0.9 0.95 1
+for spurious_strength in 0.95 0.96 0.97 0.98 0.99 1
 do
-	for val_target_size in 1000 2000 6000
+	for val_target_size in 1000 2000 3000 4000 5000 6000
 	do
 		for seed in 0 1 2
 		do

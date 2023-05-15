@@ -19,7 +19,7 @@ from PIL import Image
 import torchvision
 from scipy.linalg import qr
 import torchvision.transforms as transforms
-
+import pickle
 from matplotlib.ticker import NullFormatter
 
 
@@ -78,34 +78,86 @@ class CELEBA(Dataset):
 
 # This celeba considers the inverse problem, where the target feature is the gender and the spurious feature
 # is the hair color. This setup makes the spurious feature easier to learn than the target feature
-def get_celeba(target_resolution, VAL_SIZE, spurious_strength, data_dir, seed, indicies_val=None, indicies_target=None):
-    root = os.path.join(data_dir, "img_align_celeba")
+# y==0 -> female, y==1 -> male, a==0 -> blonde, a==1 -> non-blonde
+def get_celeba(target_resolution, val_target_size, spurious_strength, data_dir, seed, indicies_val=None, indicies_target=None):
+    save_dir = os.path.join(data_dir, f"celeba_{spurious_strength}-{val_target_size}-{seed}.pkl")
+    if os.path.exists(save_dir):
+        print("Loading Dataset")
+        with open(save_dir, 'rb') as f:
+            train_set, target_set, testset_dict = pickle.load(f)
+        return train_set, target_set, testset_dict
+    print("Generating Dataset")
     metadata = os.path.join(data_dir, "metadata_celeba.csv")
     df = pd.read_csv(metadata)
-
+    target_size = int(val_target_size / 2)
     # Train dataset
     train_df = df[df["split"] == ({"tr": 0, "va": 1, "te": 2}["tr"])]
-    train_df_x = train_df["filename"].astype(str).map(lambda x: os.path.join(root, x)).tolist()
+    train_df_x = train_df["filename"].astype(str).map(lambda x: os.path.join(data_dir, x)).tolist()
     # y==0 is non-blonde and y==1 is blonde
-    train_df_y = train_df["y"].tolist()
-    train_df_a = np.array(train_df["a"].tolist())
-    train_set = CELEBA(train_df_x, train_df_y, train_df_a, target_resolution)
-    print(train_set.group_counts)
+    train_df_y = np.array(train_df["a"].tolist())
+    train_df_a = 1 - np.array(train_df["y"].tolist())
+    y_0_a_0_idx = np.where((train_df_y == 0) & (train_df_a == 0))[0]
+    y_0_a_1_idx = np.where((train_df_y == 0) & (train_df_a == 1))[0]
+    y_1_a_0_idx = np.where((train_df_y == 1) & (train_df_a == 0))[0]
+    y_1_a_1_idx = np.where((train_df_y == 1) & (train_df_a == 1))[0]
+    np.random.shuffle(y_0_a_0_idx)
+    np.random.shuffle(y_0_a_1_idx)
+    np.random.shuffle(y_1_a_0_idx)
+    np.random.shuffle(y_1_a_1_idx)
+    target_group_size = int(target_size / 4)
+    all_idxs = np.concatenate((y_0_a_0_idx[:target_group_size], y_1_a_1_idx[:target_group_size], y_0_a_1_idx[:target_group_size], y_1_a_0_idx[:target_group_size]), axis=0)
+    target_set = CELEBA([train_df_x[i] for i in all_idxs], train_df_y[all_idxs], train_df_a[all_idxs], target_resolution)
+    print(target_set.group_counts)
+    majority_count = 10000
+    minority_count = int((1-spurious_strength) / spurious_strength * majority_count)
+    if minority_count != 0 :
+        all_idxs = np.concatenate((y_0_a_0_idx[target_group_size:target_group_size+majority_count], y_1_a_1_idx[target_group_size:target_group_size+majority_count], y_0_a_1_idx[target_group_size:target_group_size+minority_count], y_1_a_0_idx[target_group_size:target_group_size+minority_count]), axis=0)
+    else:
+        all_idxs = np.concatenate((y_0_a_0_idx[target_group_size:target_group_size+majority_count], y_1_a_1_idx[target_group_size:target_group_size+majority_count]), axis=0)
+    train_set = CELEBA([train_df_x[i] for i in all_idxs], train_df_y[all_idxs], train_df_a[all_idxs], target_resolution)
+    print(train_set.group_counts)    
     val_df = df[df["split"] == ({"tr": 0, "va": 1, "te": 2}["va"])]
-    val_df_x = val_df["filename"].astype(str).map(lambda x: os.path.join(root, x)).tolist()
-    val_df_y = val_df["y"].tolist()
-    val_df_a = np.array(val_df["a"].tolist())
-    val_dataset = CELEBA(val_df_x, val_df_y, val_df_a, target_resolution)
+    val_df_x = val_df["filename"].astype(str).map(lambda x: os.path.join(data_dir, x)).tolist()
+    val_df_y = np.array(val_df["a"].tolist())
+    val_df_a = 1 - np.array(val_df["y"].tolist())
 
-
+    y_0_a_0_idx = np.where((val_df_y == 0) & (val_df_a == 0))[0]
+    y_0_a_1_idx = np.where((val_df_y == 0) & (val_df_a == 1))[0]
+    y_1_a_0_idx = np.where((val_df_y == 1) & (val_df_a == 0))[0]
+    y_1_a_1_idx = np.where((val_df_y == 1) & (val_df_a == 1))[0]
+    all_count = min(len(y_0_a_0_idx), len(y_0_a_1_idx), len(y_1_a_0_idx), len(y_1_a_1_idx))
+    y_0_a_0_idx = np.random.choice(y_0_a_0_idx, size=all_count, replace=False)
+    y_1_a_1_idx = np.random.choice(y_1_a_1_idx, size=all_count, replace=False)
+    y_0_a_1_idx = np.random.choice(y_0_a_1_idx, size=all_count, replace=False)
+    y_1_a_0_idx = np.random.choice(y_1_a_0_idx, size=all_count, replace=False)
+    all_idxs = np.concatenate((y_0_a_0_idx, y_1_a_1_idx, y_0_a_1_idx, y_1_a_0_idx), axis=0)
+    val_dataset = CELEBA([val_df_x[i] for i in all_idxs], val_df_y[all_idxs], val_df_a[all_idxs], target_resolution)
+    print(val_dataset.group_counts)
+    
+    
     test_df = df[df["split"] == ({"tr": 0, "va": 1, "te": 2}["te"])]
-    test_df_x = test_df["filename"].astype(str).map(lambda x: os.path.join(root, x)).tolist()
-    test_df_y = test_df["y"].tolist()
-    test_df_a = np.array(test_df["a"].tolist())
-    test_dataset = CELEBA(test_df_x, test_df_y, test_df_a, target_resolution)
+    test_df_x = test_df["filename"].astype(str).map(lambda x: os.path.join(data_dir, x)).tolist()
+    test_df_y = np.array(test_df["a"].tolist())
+    test_df_a = 1 - np.array(test_df["y"].tolist())
+
+    y_0_a_0_idx = np.where((test_df_y == 0) & (test_df_a == 0))[0]
+    y_0_a_1_idx = np.where((test_df_y == 0) & (test_df_a == 1))[0]
+    y_1_a_0_idx = np.where((test_df_y == 1) & (test_df_a == 0))[0]
+    y_1_a_1_idx = np.where((test_df_y == 1) & (test_df_a == 1))[0]
+    all_count = min(len(y_0_a_0_idx), len(y_0_a_1_idx), len(y_1_a_0_idx), len(y_1_a_1_idx))
+    y_0_a_0_idx = np.random.choice(y_0_a_0_idx, size=all_count, replace=False)
+    y_1_a_1_idx = np.random.choice(y_1_a_1_idx, size=all_count, replace=False)
+    y_0_a_1_idx = np.random.choice(y_0_a_1_idx, size=all_count, replace=False)
+    y_1_a_0_idx = np.random.choice(y_1_a_0_idx, size=all_count, replace=False)
+    all_idxs = np.concatenate((y_0_a_0_idx, y_1_a_1_idx, y_0_a_1_idx, y_1_a_0_idx), axis=0)
+    test_dataset = CELEBA([test_df_x[i] for i in all_idxs], test_df_y[all_idxs], test_df_a[all_idxs], target_resolution)
+    print(test_dataset.group_counts)
 
     testset_dict = {
         'Test': test_dataset,
         'Validation': val_dataset,
     }
+    with open(save_dir, 'wb') as f:
+        pickle.dump((train_set, target_set, testset_dict), f)
+    return train_set, target_set, testset_dict
 
