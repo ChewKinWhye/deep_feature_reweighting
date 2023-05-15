@@ -1,172 +1,79 @@
-# Last Layer Re-Training is Sufficient for Robustness to Spurious Correlations
+# Spurious Correlation Via Auxiliary LEarning (SCALE)
 
-This repository contains experiments for the paper [_Last Layer Re-Training is Sufficient for
-Robustness to Spurious Correlations_](https://arxiv.org/abs/2204.02937) by Polina Kirichenko, Pavel Izmailov, and Andrew Gordon Wilson.
-
-## Introduction
-
-Neural network classifiers can largely rely on simple spurious features, such as backgrounds, to make predictions. However, even in these cases, we show that they still often learn core features associated with the desired attributes of the data, contrary to recent findings. 
-Inspired by this insight, we demonstrate that simple last layer retraining can match or outperform state-of-the-art approaches on spurious correlation benchmarks, but with profoundly lower complexity and computational expenses. Moreover, we show that last layer retraining on large ImageNet-trained models can also significantly reduce reliance on background and texture information, improving robustness to covariate shift, after only minutes of training on a single GPU.
-
-<p align="center">
-  <img src="https://user-images.githubusercontent.com/14368801/162003714-604f91fe-059e-47bf-8462-5ce7e662cec5.png">
-</p>
-
-Please cite our paper if you find it helpful in your work:
-```bibtex
-@article{kirichenko2022dfr,
-  title={Last Layer Re-Training is Sufficient for Robustness to Spurious Correlations},
-  author={Kirichenko, Polina and Izmailov, Pavel and Wilson, Andrew Gordon},
-  journal={arXiv preprint arXiv:2204.02937},
-  year={2022}
-}
-```
-
-## File Structure
-
-```
-.
-+-- notebooks/
-|   +-- data_generation/
-|   |   +-- generate_imagenet9_bg_paintings.ipynb (ImageNet-9 Paintings-BG data)
-|   |   +-- generate_waterbirds_fg_bg.ipynb (Generate FG and BG-Only Waterbirds data)
-|   +-- imagenet_stylized/
-|   |   +-- imagenet_stylized_dfr_train.ipynb (Train DFR on Stylized Imagenet)
-|   |   +-- imagenet_stylized_dfr_evaluate.ipynb (Evaluate DFR on Stylized Imagenet)
-|   +-- imagennet9_dfr.ipynb (Train and evaluate DFR on ImageNet-9 BG challenge)
-|   +-- in_to_in9.json (ImageNet to ImageNet-9 class maping)
-+-- celeba_metadata.csv (Metadata file for CelebA)
-+-- train_classifier.py (Train base models on CelebA and WaterBirds)
-+-- utils.py (Utility functions)
-+-- wb_data.py (CelebA and WaterBirds dataloaders)
-+-- imagenet_datasets.py (Dataloaders for ImageNet variations)
-+-- imagenet_extract_embeddings.py (Extract embeddings from an ImageNet-like dataset)
-+-- dfr_evaluate_spurious.py (Tune and evaluate DFR for a given base model)
-```
 
 ## Data access
+The CelebA dataset has to be manually downloaded from  [here](https://www.kaggle.com/datasets/jessicali9530/celeba-dataset) and moved into the `data/celeba` directory.
 
-- Waterbirds: see instructions [here](https://github.com/kohpangwei/group_DRO#waterbirds).
-- CelebA: see instruction [here](https://github.com/kohpangwei/group_DRO#celeba).
-- ImageNet and Stylized ImageNet: see instruction [here](https://github.com/rgeirhos/Stylized-ImageNet#usage).
-- ImageNet-C: see instruction [here](https://github.com/hendrycks/robustness).
-- ImageNet-R: see instruction [here](https://github.com/hendrycks/imagenet-r).
-- Background Challenge: see instruction [here](https://github.com/MadryLab/backgrounds_challenge).
+The MNIST-CIFAR Dominoes dataset will be automatically downloaded and generated.
 
-For CelebA, please copy the `celeba_metadata.csv` from this repo to the root
-folder containing the CelebA dataset and rename it to `metadata.csv`.
 
-We provide jupyter notebooks to generate the Paintings-BG split of ImageNet-9
-and aligned FG-Only, BG-Only and Original Waterbirds splits in 
-`notebooks/data_generation/`.
-
-## Example comands: spurious correlation benchmarks 
+## Example commands: 
 
 ### Base models
 
-To train base models on CelebA and Waterbirds, use the following commands.
+To train base ERM models on the Dominoes dataset, use the command:
 ```bash
-# Waterbirds
-python3 train_classifier.py --output_dir=<OUTPUT_DIR> --pretrained_model \
-  --num_epochs=100 --weight_decay=1e-3 --batch_size=32 --init_lr=1e-3 \
-  --eval_freq=1 --data_dir=<WATERBIRDS_DIR> --test_wb_dir=<WATERBIRDS_DIR> \
-  --augment_data --seed=<SEED>
-
-# CelebA
-python3 train_classifier.py --output_dir=<OUTPUT_DIR> --pretrained_model \
-  --num_epochs=50 --weight_decay=1e-4 --batch_size=128 --init_lr=1e-3 \
-  --eval_freq=1 --data_dir=<CELEBA_DIR> --test_wb_dir=<CELEBA_DIR> \
-  --augment_data --seed=<SEED>
+python train.py --pretrained_model --num_epochs 50 --method=0 --dataset=mcdominoes \
+  --spurious_strength=1 --val_target_size=2000 --weight_decay=1e-3 --batch_size=16 \
+   --init_lr=1e-3 --seed=0 --data_dir=<DOMINOES_DIR> --output_dir=<OUTPUT_DIR>
 ```
 
-Here `OUTPUT_DIR` is a path to the folder where the logs will be stored,
-`WATERBIRDS_DIR` and `CELEBA_DIR` are the directories containing waterbirds
-and CelebA data respectively, and `SEED` is the random seed.
+The `OUTPUT_DIR` is a path to the folder where the logs will be stored.
+The `DOMINOES_DIR` is the directory to download and store the dominoes dataset.
 
-To train base models without minority groups (for DFR_{TR-NM}^{TR}), use the
-following commands.
-```bash
-# Waterbirds
-python3 train_classifier.py ---output_dir=<OUTPUT_DIR> --pretrained_model \
-  --num_epochs=100 --weight_decay=1e-3 --batch_size=32 --init_lr=1e-3 \
-  --eval_freq=1 --data_dir=<WATERBIRDS_DIR> --test_wb_dir=<WATERBIRDS_DIR> \
-  --augment_data --seed=<SEED> num_minority_groups_remove=2
-
-# CelebA
-python3 train_classifier.py --output_dir=<OUTPUT_DIR> --pretrained_model \
-  --num_epochs=50 --weight_decay=1e-4 --batch_size=128 --init_lr=1e-3 \
-  --eval_freq=1 --data_dir=<CELEBA_DIR> --test_wb_dir=<CELEBA_DIR> \
-  --augment_data --seed=<SEED> --num_minority_groups_remove=1
-```
-
-You can train models without ImageNet-pretrained initialization by removing
-the `--pretrained_model` flag.
-You can disable data augmentation by removing the `--augment_data` flag.
-You can change the number of epochs, weight decay, learning rate and batch size
-with the `--num_epochs`, `--weight_decay`, `--init_lr`, and `--batch_size` flags
+The `--pretrained_model` flag initializes the model with the 
+ImageNet-pretrained weights.
+The number of epochs, weight decay, learning rate and batch size is set via 
+the `--num_epochs`, `--weight_decay`, `--init_lr`, and `--batch_size` flags
 respectively.
+
+The `--spurious_strength` flag controls the strength of the spurious correlation in 
+the train dataset, with 1 corresponding to 100% correlation. The `--val_target_size` flag controls the size of the validation + target size, with the
+target size = val_target_size / 2. The `--dataset` flag determines which dataset to use, which can be either mcdominoes or celeba
+
+The `--method` flag determines which method to use to train the model, which can take values of
+0, 1, 2, which corresponds to ERM on train, ERM on target, 
+and our proposed SCALE method respectively.
 
 ### DFR
 
-You can run DFR (all variations) on the Waterbirds and CelebA data with the 
-following commands.
-
+The DFR technique retrains the last-layer of the model on the target dataset, 
+which is used on the model learnt from the ERM on train method (Method 0).
 ```bash
-python3 dfr_evaluate_spurious.py --data_dir=<DATA_DIR> \
-  --result_path=<RESULT_PATH.pkl> --ckpt_path=<CKPT_PATH> \
-  --tune_class_weights_dfr_train
+python retrain.py --dataset=mcdominoes --val_target_size=2000 
+--spurious_strength=1 --ckpt_path=<CKPT_PATH> --seed=0 
+--data_dir=<DOMINOES_DIR> --output_dir=<OUTPUT_DIR>
 ```
+The `CKPT_PATH` is the directory of the model to be retrained, and the `OUTPUT_DIR` is the 
+directory where the retrained model is saved.
 
-Here `DATA_DIR` is the directory containing Waterbirds or CelebA data,
-`RESULT_PATH` is the path where a pickle dump of the results will be saved,
-and `CKPT_PATH` is the checkpoint path.
-For DFR_{TR-NM}^{TR} do not use the `--tune_class_weights_dfr_train` flag, if you do not
-want to tune the class weights.
+The `--seed`, `--spurious_strength`, and `--val_target_size` flags should be the same as
+the flags that the model in the `CKPT_PATH` was trained on. This is to ensure that the train,
+target, validation, and test datasets do not change, which would otherwise result in data leakage.
 
-The script will output the results to console and save them to `RESULT_PATH`.
-
-## ImageNet experiments
-
-### Extracting embeddings 
-
-To reproduce the ImageNet experiments in the paper, you will need to first comnpute
-the embeddings of the data using the base model. 
-We provide a `imagenet_extract_embeddings.py` script for this purpose:
-
+### SCALE
+The SCALE method uses both the train and target gradients for the model updates, and 
+additionally regularizes the train gradients based on the gradient alignment between the
+train and the target gradients, measured by the cosine similarity.
 ```bash
-python3 imagenet_extract_embeddings.py --dataset_dir=<DATA_PATH> \
-  --split=[val | train] --model=[resnet50 | vitb16] --batch_size=100
+\python train.py --pretrained_model --num_epochs 50 --method=2 --dataset=mcdominoes \
+  --spurious_strength=1 --val_target_size=2000 --weight_decay=1e-3 --batch_size=16 \
+   --init_lr=1e-3 --group_size=64 --regularize_mode=0 --seed=0 
+   --data_dir=<DOMINOES_DIR> --output_dir=<OUTPUT_DIR>
 ```
+Our proposed method has two extra hyperparameters. The  `--group_size` flag sets the size of
+each parameter group, since the cosine similarity and task weight parameter is 
+computed and applied in a group-wise manner.
 
-Here you can specify paths to the desired ImageNet variation folder in place of
-`DATA_PATH`.
-You can also specify which dataset variation you are using with the `--dataset` flag
-with possible values `[imagenet | imagenet-a | imagenet-r | imagenet-c | bg_challenge]`.
+The `--regularize_mode` determines the function that maps the cosine similarity to the 
+task weight parameter, with `--regularize_mode=0` and `--regularize_mode=3` corresponding to
+Linear and Step functions respectively.
 
-The extracted embeddings will be saved in the `<DATA_PATH>` root folder.
-
-### DFR on Background Challenge
-
-We provide a jupyter notebook to reproduce our results on ImageNet-9 Background challenge
-data at `notebooks/imagennet9_dfr.ipynb`.
-
-### DFR Texture Bias
-
-We provide a jupyter notebooks to reproduce our results on texture bias
-data at `notebooks/imagenet_stylized/`.
-First, run `imagenet_stylized_dfr_train.ipynb` to train the DFR models on
-Stylized ImageNet variations.
-Then, run `imagenet_stylized_dfr_evaluate.ipynb` to evaluate the trained models
-on all ImageNet variations.
+## Additional Scripts
+The scripts used to run the tuning and ablation experiments can be found in the
+`scripts` folder.
 
 ## References
+This code is modified from the original [_Deep Feature Reweighting_](https://github.com/PolinaKirichenko/deep_feature_reweighting) codebase.
 
-The `train_classifier.py`, `utils.py` and `wb_data.py` are adapted from the 
-[kohpangwei/group_DRO repo](https://github.com/kohpangwei/group_DRO).
-Dataloaders in `imagenet_datasets.py` are adapted from
-[MadryLab/backgrounds_challenge repo](https://github.com/MadryLab/backgrounds_challenge)
-and 
-[rgeirhos/Stylized-ImageNet](https://github.com/rgeirhos/Stylized-ImageNet).
-We use VIT-B-16 model pre-trained on ImageNet-21k and fine-tuned on ImageNet from
-the [lukemelas/PyTorch-Pretrained-ViT repo](https://github.com/lukemelas/PyTorch-Pretrained-ViT).
-To evaluate shape bias of the models we use the [bethgelab/model-vs-human repo](https://github.com/bethgelab/model-vs-human).
+The code for the generation of the Dominoes dataset is modified from the original [_Simplicity Bias_](https://github.com/harshays/simplicitybiaspitfalls) codebase.

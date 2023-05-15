@@ -55,8 +55,8 @@ def parse_args():
     # Method 2: Balanced Optimizer
 
     # Additional Method 2 Args
-    parser.add_argument("--group_size", type=int, default=4, help="Number kernels per group")
-    parser.add_argument("--regularize_mode", type=int, help="For 0, cosine similarity of -1 will be 0. For 1, cosine similarity of 0.5 will be 0. For 2, cosine similarity of -1 will be -1. For 3, output will be the sign function")
+    parser.add_argument("--group_size", type=int, default=64, help="Number kernels per group")
+    parser.add_argument("--regularize_mode", type=int, default=0)
 
     args = parser.parse_args()
     return args
